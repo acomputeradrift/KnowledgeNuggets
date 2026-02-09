@@ -47,5 +47,5 @@ docker compose up --build
 
 ## Notes
 
-- SendGrid/APNs/OpenAI are optional. If keys are missing, the server will skip sending.
+- MailerSend/APNs/OpenAI are optional. If keys are missing, the server will skip sending.
 - Amazon Product Advertising API integration uses a search fallback until signed requests are implemented.

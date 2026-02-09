@@ -5,12 +5,12 @@ import { sendEmail } from './services/email.js';
 import { sendPush } from './services/push.js';
 import { formatLocalDate } from './utils/time.js';
 
-const getRotationIndex = (anchorDate, todayLocal) => {
+const getRotationIndex = (anchorDate, todayLocal, rotationSize = 21) => {
   const anchor = new Date(anchorDate);
   const today = new Date(`${todayLocal}T00:00:00Z`);
   const msPerDay = 24 * 60 * 60 * 1000;
   const daysSince = Math.floor((today - anchor) / msPerDay);
-  return (daysSince % 21) + 1;
+  return (daysSince % rotationSize) + 1;
 };
 
 export const sendNuggetNow = async (userId) => {
@@ -26,8 +26,8 @@ export const sendNuggetNow = async (userId) => {
   }
   const settings = settingsRes.rows[0];
   const activeCountRes = await query('SELECT COUNT(*)::int AS count FROM nuggets WHERE user_id = $1 AND active = true', [userId]);
-  if (activeCountRes.rows[0].count < 21) {
-    console.warn('User has fewer than 21 active nuggets', { userId });
+  const activeCount = activeCountRes.rows[0].count;
+  if (activeCount < 1) {
     return;
   }
 
@@ -38,7 +38,8 @@ export const sendNuggetNow = async (userId) => {
 
   const todayLocal = formatLocalDate(new Date(), settings.timezone);
   const anchorDate = settings.anchor_date ?? new Date();
-  const position = getRotationIndex(anchorDate, todayLocal);
+  const rotationSize = Math.min(activeCount, 21);
+  const position = getRotationIndex(anchorDate, todayLocal, rotationSize);
 
   const nuggetRes = await query(
     'SELECT * FROM nuggets WHERE user_id = $1 AND active = true AND position = $2 LIMIT 1',
