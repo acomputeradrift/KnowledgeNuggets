@@ -1,6 +1,7 @@
 import fetch from 'node-fetch';
 import { config } from '../config.js';
 import { suggestCategoryRules } from './category.js';
+import { lookupOpenLibrary } from './openlibrary.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/responses';
 
@@ -67,4 +68,44 @@ export const enrichNugget = async ({ text, authorName, bookTitle }) => {
     normalizedAuthor: parsed.author ?? authorName ?? null,
     normalizedBookTitle: parsed.book ?? bookTitle ?? null
   };
+};
+
+export const fillMissingMetadata = async ({ text, authorName, bookTitle }) => {
+  const inputAuthor = authorName?.trim() || null;
+  const inputBook = bookTitle?.trim() || null;
+  let author = inputAuthor;
+  let book = inputBook;
+
+  const authorMissing = !author || author === 'Unknown';
+  const bookMissing = !book || book === 'Unknown';
+  const needsAuthor = !!book && authorMissing;
+  const needsBook = !!author && bookMissing;
+
+  console.info('Metadata fill input', { author, book, needsAuthor, needsBook });
+
+  if (needsAuthor || needsBook) {
+    console.info('Calling OpenLibrary for metadata fill');
+    const lookup = await lookupOpenLibrary({
+      author: authorMissing ? null : author,
+      book: bookMissing ? null : book
+    });
+    if (authorMissing) {
+      author = lookup.author ?? author;
+    }
+    if (bookMissing) {
+      book = lookup.book ?? book;
+    }
+    console.info('OpenLibrary result', { author, book });
+  } else {
+    console.info('Skipping OpenLibrary (metadata complete)', { author, book });
+  }
+
+  if (book && !author) {
+    author = 'Unknown';
+  }
+  if (author && !book) {
+    book = 'Unknown';
+  }
+
+  return { author, book };
 };

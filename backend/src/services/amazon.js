@@ -11,10 +11,10 @@ const MARKETPLACE_MAP = {
 const buildSearchUrl = ({ bookTitle, authorName, marketplace }) => {
   const host = MARKETPLACE_MAP[marketplace] ?? MARKETPLACE_MAP.US;
   const query = [bookTitle, authorName].filter(Boolean).join(' ');
-  const params = new URLSearchParams({
-    k: query,
-    tag: config.amazonPartnerTag || undefined
-  });
+  const params = new URLSearchParams({ k: query });
+  if (config.amazonPartnerTag) {
+    params.set('tag', config.amazonPartnerTag);
+  }
   return `https://${host}/s?${params.toString()}`;
 };
 

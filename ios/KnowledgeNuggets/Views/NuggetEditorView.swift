@@ -2,12 +2,21 @@ import SwiftUI
 
 struct NuggetEditorView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var text: String = ""
-    @State private var authorName: String = ""
-    @State private var bookTitle: String = ""
-    @State private var category: String = ""
-
+    @State private var text: String
+    @State private var authorName: String
+    @State private var bookTitle: String
+    @State private var category: String
+    private let existing: Nugget?
     let onSave: (Nugget) -> Void
+
+    init(existing: Nugget? = nil, onSave: @escaping (Nugget) -> Void) {
+        self.existing = existing
+        _text = State(initialValue: existing?.text ?? "")
+        _authorName = State(initialValue: existing?.authorName ?? "")
+        _bookTitle = State(initialValue: existing?.bookTitle ?? "")
+        _category = State(initialValue: existing?.category ?? "")
+        self.onSave = onSave
+    }
 
     var body: some View {
         NavigationView {
@@ -26,27 +35,32 @@ struct NuggetEditorView: View {
                     TextField("Category", text: $category)
                 }
                 Section(header: Text("Amazon")) {
-                    Text("Auto-generated after save")
-                        .foregroundColor(.secondary)
+                    if let link = existing?.amazonLink, let url = URL(string: link) {
+                        Link("View on Amazon", destination: url)
+                    } else {
+                        Text("Auto-generated after save")
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
-            .navigationTitle("New Nugget")
+            .navigationTitle(existing == nil ? "New Nugget" : "Edit Nugget")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let nugget = Nugget(
-                            id: UUID().uuidString,
+                            id: existing?.id ?? UUID().uuidString,
                             text: text,
                             authorName: authorName.isEmpty ? nil : authorName,
                             bookTitle: bookTitle.isEmpty ? nil : bookTitle,
-                            amazonLink: nil,
+                            amazonLink: existing?.amazonLink,
                             category: category.isEmpty ? nil : category,
-                            position: nil,
-                            active: true
+                            position: existing?.position,
+                            active: existing?.active ?? true
                         )
                         onSave(nugget)
                         dismiss()
                     }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

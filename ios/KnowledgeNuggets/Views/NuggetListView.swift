@@ -12,17 +12,36 @@ struct NuggetListView: View {
                     Text(errorMessage).foregroundColor(.red)
                 }
                 ForEach(nuggets) { nugget in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(nugget.text)
-                            .font(.headline)
-                        if let author = nugget.authorName {
-                            Text(author).font(.subheadline).foregroundColor(.secondary)
-                        }
-                        if let book = nugget.bookTitle {
-                            Text(book).font(.subheadline).foregroundColor(.secondary)
-                        }
-                        if let category = nugget.category {
-                            Text(category).font(.caption).foregroundColor(.secondary)
+                    NavigationLink {
+                        NuggetEditorView(existing: nugget, onSave: { updated in
+                            Task {
+                                do {
+                                    let saved = try await APIClient.shared.updateNugget(updated, original: nugget)
+                                    if let index = nuggets.firstIndex(where: { $0.id == saved.id }) {
+                                        nuggets[index] = saved
+                                    }
+                                } catch {
+                                    errorMessage = "Failed to update nugget."
+                                }
+                            }
+                        })
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(nugget.text)
+                                .font(.headline)
+                            if let author = nugget.authorName {
+                                Text(author).font(.subheadline).foregroundColor(.secondary)
+                            }
+                            if let book = nugget.bookTitle {
+                                Text(book).font(.subheadline).foregroundColor(.secondary)
+                            }
+                            if let category = nugget.category {
+                                Text(category).font(.caption).foregroundColor(.secondary)
+                            }
+                            if let link = nugget.amazonLink, let url = URL(string: link) {
+                                Link("View on Amazon", destination: url)
+                                    .font(.caption)
+                            }
                         }
                     }
                 }

@@ -50,6 +50,13 @@ final class APIClient {
         let category: String?
         let active: Bool
     }
+    struct NuggetUpdateRequest: Encodable {
+        let text: String?
+        let author_name: String?
+        let book_title: String?
+        let category: String?
+        let active: Bool?
+    }
     struct SettingsRequest: Encodable {
         let send_time_local: String
         let timezone: String
@@ -83,6 +90,17 @@ final class APIClient {
             active: nugget.active
         ))
         return try await request("nuggets", method: "POST", body: payload)
+    }
+
+    func updateNugget(_ nugget: Nugget, original: Nugget) async throws -> Nugget {
+        let payload = try JSONEncoder().encode(NuggetUpdateRequest(
+            text: nugget.text,
+            author_name: nugget.authorName ?? (original.authorName == nil ? nil : ""),
+            book_title: nugget.bookTitle ?? (original.bookTitle == nil ? nil : ""),
+            category: nugget.category ?? (original.category == nil ? nil : ""),
+            active: nugget.active
+        ))
+        return try await request("nuggets/\(nugget.id)", method: "PUT", body: payload)
     }
 
     func fetchSettings() async throws -> UserSettings {

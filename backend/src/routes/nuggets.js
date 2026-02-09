@@ -1,7 +1,7 @@
 import express from 'express';
 import { query, pool } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { enrichNugget } from '../services/enrichment.js';
+import { enrichNugget, fillMissingMetadata } from '../services/enrichment.js';
 import { lookupAmazonLink } from '../services/amazon.js';
 
 export const nuggetsRouter = express.Router();
@@ -36,7 +36,33 @@ nuggetsRouter.post('/', requireAuth, async (req, res) => {
   }
   const enrichment = await enrichNugget({ text, authorName: author_name, bookTitle: book_title });
   const finalCategory = category ?? enrichment.category;
-  const amazon = await lookupAmazonLink({ bookTitle: enrichment.normalizedBookTitle ?? book_title, authorName: enrichment.normalizedAuthor ?? author_name, marketplace });
+  const normalizedAuthor = enrichment.normalizedAuthor ?? author_name ?? null;
+  const normalizedBookTitle = enrichment.normalizedBookTitle ?? book_title ?? null;
+  const filled = await fillMissingMetadata({ text, authorName: normalizedAuthor, bookTitle: normalizedBookTitle });
+  const finalAuthor = filled.author;
+  const finalBookTitle = filled.book;
+  const canGenerateAmazon =
+    !!finalAuthor &&
+    !!finalBookTitle &&
+    finalAuthor !== 'Unknown' &&
+    finalBookTitle !== 'Unknown';
+  const amazon = canGenerateAmazon
+    ? await lookupAmazonLink({ bookTitle: finalBookTitle, authorName: finalAuthor, marketplace })
+    : { url: null };
+  if (!finalAuthor || !finalBookTitle || finalAuthor === 'Unknown' || finalBookTitle === 'Unknown') {
+    console.info('Nugget metadata incomplete after enrichment', {
+      userId: req.user.userId,
+      author: finalAuthor,
+      book: finalBookTitle
+    });
+  }
+  if (!amazon?.url) {
+    console.info('Amazon link not generated', {
+      userId: req.user.userId,
+      author: finalAuthor,
+      book: finalBookTitle
+    });
+  }
 
   const position = active ? activeCount + 1 : null;
   const result = await query(
@@ -46,8 +72,8 @@ nuggetsRouter.post('/', requireAuth, async (req, res) => {
     [
       req.user.userId,
       text,
-      author_name ?? null,
-      book_title ?? null,
+      finalAuthor ?? null,
+      finalBookTitle ?? null,
       finalCategory ?? null,
       amazon.url,
       active ?? true,
@@ -62,6 +88,9 @@ nuggetsRouter.post('/', requireAuth, async (req, res) => {
 nuggetsRouter.put('/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { text, author_name, book_title, category, active } = req.body ?? {};
+  if (text !== undefined && text.trim().length === 0) {
+    return res.status(400).json({ error: 'missing_text' });
+  }
   const existing = await query('SELECT * FROM nuggets WHERE id = $1 AND user_id = $2', [id, req.user.userId]);
   if (existing.rowCount === 0) {
     return res.status(404).json({ error: 'not_found' });
@@ -76,9 +105,43 @@ nuggetsRouter.put('/:id', requireAuth, async (req, res) => {
     }
   }
 
-  const enrichment = await enrichNugget({ text: text ?? current.text, authorName: author_name ?? current.author_name, bookTitle: book_title ?? current.book_title });
-  const finalCategory = category ?? enrichment.category ?? current.category;
-  const amazon = await lookupAmazonLink({ bookTitle: enrichment.normalizedBookTitle ?? book_title ?? current.book_title, authorName: enrichment.normalizedAuthor ?? author_name ?? current.author_name, marketplace });
+  const hasAuthorField = author_name !== undefined;
+  const hasBookField = book_title !== undefined;
+  const hasCategoryField = category !== undefined;
+  const normalizedAuthorInput = author_name === '' ? null : author_name;
+  const normalizedBookInput = book_title === '' ? null : book_title;
+  const normalizedCategoryInput = category === '' ? null : category;
+  const enrichedAuthor = hasAuthorField ? normalizedAuthorInput : current.author_name;
+  const enrichedBookTitle = hasBookField ? normalizedBookInput : current.book_title;
+  const enrichment = await enrichNugget({ text: text ?? current.text, authorName: enrichedAuthor, bookTitle: enrichedBookTitle });
+  const finalCategory = hasCategoryField ? normalizedCategoryInput ?? enrichment.category : enrichment.category ?? current.category;
+  const normalizedAuthor = enrichment.normalizedAuthor ?? enrichedAuthor ?? null;
+  const normalizedBookTitle = enrichment.normalizedBookTitle ?? enrichedBookTitle ?? null;
+  const filled = await fillMissingMetadata({ text: text ?? current.text, authorName: normalizedAuthor, bookTitle: normalizedBookTitle });
+  const finalAuthor = filled.author;
+  const finalBookTitle = filled.book;
+  const canGenerateAmazon =
+    !!finalAuthor &&
+    !!finalBookTitle &&
+    finalAuthor !== 'Unknown' &&
+    finalBookTitle !== 'Unknown';
+  const amazon = canGenerateAmazon
+    ? await lookupAmazonLink({ bookTitle: finalBookTitle, authorName: finalAuthor, marketplace })
+    : { url: null };
+  if (!finalAuthor || !finalBookTitle || finalAuthor === 'Unknown' || finalBookTitle === 'Unknown') {
+    console.info('Nugget metadata incomplete after enrichment', {
+      userId: req.user.userId,
+      author: finalAuthor,
+      book: finalBookTitle
+    });
+  }
+  if (!amazon?.url) {
+    console.info('Amazon link not generated', {
+      userId: req.user.userId,
+      author: finalAuthor,
+      book: finalBookTitle
+    });
+  }
 
   const result = await query(
     `UPDATE nuggets
@@ -90,7 +153,7 @@ nuggetsRouter.put('/:id', requireAuth, async (req, res) => {
          active = COALESCE($6, active)
      WHERE id = $7 AND user_id = $8
      RETURNING *`,
-    [text, author_name, book_title, finalCategory, amazon.url, active, id, req.user.userId]
+    [text, finalAuthor, finalBookTitle, finalCategory, amazon.url, active, id, req.user.userId]
   );
 
   await resetAnchorIfReady(req.user.userId);

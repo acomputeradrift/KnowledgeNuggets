@@ -16,7 +16,7 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: session.deviceToken) { token in
+        .onChange(of: session.deviceToken) { _, token in
             guard let token else { return }
             Task { try? await APIClient.shared.registerDevice(token: token) }
         }
