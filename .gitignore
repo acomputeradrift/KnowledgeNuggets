@@ -8,3 +8,8 @@ node_modules
 *.xcuserstate
 *.xcuserdata/
 DerivedData/
+
+# Build output
+ios/build/
+build/
+ios/KnowledgeNuggets.xcodeproj/
