@@ -5,65 +5,51 @@ struct NuggetEditorView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("lastNuggetKind") private var lastKind = NuggetKind.default.rawValue
     @State private var draft: NuggetDraft
+    @State private var showsCategory: Bool
     @State private var limitMessage: String?
     @FocusState private var focus: Field?
 
     private enum Field: Hashable {
-        case text, author, book, category
+        case content, by, from, category
     }
 
     init(nugget: Nugget?) {
         self.nugget = nugget
-        _draft = State(initialValue: nugget.map(NuggetDraft.init) ?? NuggetDraft())
+        let draft = nugget.map(NuggetDraft.init) ?? NuggetDraft()
+        _draft = State(initialValue: draft)
+        _showsCategory = State(initialValue: !draft.category.isEmpty)
     }
 
     private var original: NuggetDraft {
-        nugget.map(NuggetDraft.init) ?? NuggetDraft()
+        nugget.map(NuggetDraft.init) ?? NuggetDraft(kind: draft.kind)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Type or paste the passage", text: $draft.text, axis: .vertical)
+                    KindPicker(selection: $draft.kind)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
+
+                Section("Content") {
+                    TextField("Type or paste…", text: $draft.text, axis: .vertical)
                         .lineLimit(4...14)
-                        .focused($focus, equals: .text)
-                        .accessibilityLabel("Passage")
-                } header: {
-                    Text("Passage")
+                        .focused($focus, equals: .content)
+                        .accessibilityLabel("Content")
                 }
 
-                Section {
-                    TextField("Author", text: $draft.author)
-                        .textContentType(.name)
-                        .textInputAutocapitalization(.words)
-                        .submitLabel(.next)
-                        .focused($focus, equals: .author)
-                        .onSubmit { focus = .book }
-                    TextField("Book", text: $draft.book)
-                        .textInputAutocapitalization(.words)
-                        .submitLabel(.next)
-                        .focused($focus, equals: .book)
-                        .onSubmit { focus = .category }
-                } header: {
-                    Text("Source")
-                } footer: {
-                    Text("Optional. Enter just the author or just the book and the other is filled in from Open Library when there's an exact match.")
+                if draft.kind.hasSource {
+                    sourceSection
                 }
 
-                Section {
-                    TextField("Category", text: $draft.category)
-                        .textInputAutocapitalization(.words)
-                        .submitLabel(.done)
-                        .focused($focus, equals: .category)
-                        .onSubmit(save)
-                } header: {
-                    Text("Category")
-                } footer: {
-                    Text("Optional.")
-                }
+                categorySection
             }
+            .listSectionSpacing(.compact)
+            .animation(.default, value: draft.kind)
             .navigationTitle(nugget == nil ? "New Nugget" : "Edit Nugget")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -72,12 +58,15 @@ struct NuggetEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: save)
-                        .disabled(!draft.isValid)
+                        .disabled(!draft.canSave)
                 }
             }
             .interactiveDismissDisabled(draft != original)
             .onAppear {
-                if nugget == nil { focus = .text }
+                if nugget == nil {
+                    draft.kind = NuggetKind(rawValue: lastKind) ?? .default
+                    focus = .content
+                }
             }
             .alert(
                 "Saved as Inactive",
@@ -91,12 +80,139 @@ struct NuggetEditorView: View {
         }
     }
 
+    // MARK: Sections
+
+    private var sourceSection: some View {
+        Section {
+            // Above the fields so the keyboard never covers it.
+            let recents = model.recentSources(for: draft.kind, matching: draft.book)
+            if !recents.isEmpty {
+                RecentSourcesRow(sources: recents) { source in
+                    draft.book = source.from
+                    if NuggetDraft.clean(draft.author) == nil, let by = source.by {
+                        draft.author = by
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+            }
+            LabeledContent("By") {
+                TextField("By", text: $draft.author, prompt: Text(draft.kind.byPrompt))
+                    .textContentType(.name)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.next)
+                    .focused($focus, equals: .by)
+                    .onSubmit { focus = .from }
+            }
+            LabeledContent("From") {
+                TextField("From", text: $draft.book, prompt: Text(draft.kind.fromPrompt))
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .focused($focus, equals: .from)
+                    .onSubmit(save)
+            }
+
+        } footer: {
+            if let missing = draft.missingRequirement, draft.isValid {
+                Text(missing)
+            } else if draft.kind.supportsLookup {
+                Text("Enter just the author or just the book and the other is filled in from Open Library when there's an exact match.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var categorySection: some View {
+        if showsCategory {
+            Section("Category") {
+                TextField("Category", text: $draft.category, prompt: Text("Optional"))
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .focused($focus, equals: .category)
+                    .onSubmit(save)
+            }
+        } else {
+            Section {
+                Button {
+                    showsCategory = true
+                    focus = .category
+                } label: {
+                    Label("Add Category", systemImage: "plus.circle")
+                }
+            }
+        }
+    }
+
     private func save() {
-        guard draft.isValid else { return }
+        guard draft.canSave else { return }
+        if nugget == nil { lastKind = draft.kind.rawValue }
         if let message = model.save(draft, editing: nugget) {
             limitMessage = message
         } else {
             dismiss()
+        }
+    }
+}
+
+/// One tap to choose the kind of nugget.
+struct KindPicker: View {
+    @Binding var selection: NuggetKind
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(NuggetKind.allCases) { kind in
+                        chip(for: kind).id(kind)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .onAppear { proxy.scrollTo(selection, anchor: .center) }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Kind")
+    }
+
+    @ViewBuilder
+    private func chip(for kind: NuggetKind) -> some View {
+        let isSelected = kind == selection
+        let button = Button {
+            selection = kind
+        } label: {
+            Label(kind.title, systemImage: kind.symbol)
+                .font(.subheadline.weight(.medium))
+        }
+        .buttonBorderShape(.capsule)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+        if isSelected {
+            button.primaryActionStyle()
+        } else {
+            button.buttonStyle(.bordered).tint(.secondary)
+        }
+    }
+}
+
+/// Recently used sources, tap to fill From (and By, if it's empty).
+struct RecentSourcesRow: View {
+    let sources: [AppModel.RecentSource]
+    let onSelect: (AppModel.RecentSource) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Text("Recent")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                ForEach(sources) { source in
+                    Button(source.from) { onSelect(source) }
+                        .font(.footnote)
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .accessibilityHint("Fills in From\(source.by.map { " and By with \($0)" } ?? "").")
+                }
+            }
+            .padding(.horizontal, 20)
         }
     }
 }

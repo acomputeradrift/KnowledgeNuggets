@@ -31,7 +31,7 @@ final class AppModelTests: XCTestCase {
 
     func testPermissionIsNotRequestedAtLaunchButWhenATimeIsSet() async {
         let model = makeModel()
-        model.save(NuggetDraft(text: "One"))
+        model.save(NuggetDraft(text: "One", kind: .affirmation))
         await model.appBecameActive()
         XCTAssertEqual(center.authorizationRequests, 0)
         XCTAssertEqual(center.pending.count, 0)
@@ -48,8 +48,8 @@ final class AppModelTests: XCTestCase {
     func testEveryChangeReschedules() async {
         center.setStatus(.authorized)
         let model = makeModel()
-        model.save(NuggetDraft(text: "One"))
-        model.save(NuggetDraft(text: "Two"))
+        model.save(NuggetDraft(text: "One", kind: .affirmation))
+        model.save(NuggetDraft(text: "Two", kind: .affirmation))
         await model.rescheduleNow()
         XCTAssertEqual(Set(center.pending.map(\.content.body)), ["One", "Two"])
 
@@ -81,7 +81,7 @@ final class AppModelTests: XCTestCase {
 
     func testTodayAndUpNextFollowListOrder() async {
         let model = makeModel()
-        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name)) }
+        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name, kind: .affirmation)) }
         XCTAssertEqual(model.todayNugget?.text, "A")
         XCTAssertEqual(model.upNextNugget?.text, "B")
 
@@ -93,9 +93,9 @@ final class AppModelTests: XCTestCase {
     func testSavingPastTheLimitReturnsAMessage() {
         let model = makeModel()
         for index in 0..<21 {
-            XCTAssertNil(model.save(NuggetDraft(text: "N\(index)")))
+            XCTAssertNil(model.save(NuggetDraft(text: "N\(index)", kind: .affirmation)))
         }
-        XCTAssertNotNil(model.save(NuggetDraft(text: "Too many")))
+        XCTAssertNotNil(model.save(NuggetDraft(text: "Too many", kind: .affirmation)))
         XCTAssertEqual(model.active.count, 21)
         XCTAssertEqual(model.inactive.map(\.text), ["Too many"])
     }
@@ -124,7 +124,7 @@ final class AppModelTests: XCTestCase {
     func testNoLookupWhenBothOrNeitherKnown() async {
         let model = makeModel(lookup: FakeLookup(authors: ["B": "Should not be used"]))
         model.save(NuggetDraft(text: "x", author: "A", book: "B"))
-        model.save(NuggetDraft(text: "y"))
+        model.save(NuggetDraft(text: "y", kind: .affirmation))
         XCTAssertNil(model.lookupTask)
         XCTAssertEqual(model.active.first?.author, "A")
     }

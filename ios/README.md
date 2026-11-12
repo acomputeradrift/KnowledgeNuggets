@@ -53,4 +53,8 @@ For screenshots and manual checks (Debug builds only):
 
 **Rotation start** is set the first time notifications are scheduled. Rotation uses list position, not stored sort numbers, so deleting or deactivating a nugget never leaves an empty day.
 
+**Adding a nugget.** Pick a kind (Book, Movie, Show, Podcast, Quote, Affirmation, Other; the last one used is remembered), type the content, then fill in By and/or From. One of By or From is required for every kind except Affirmation, which has neither. Recently used sources for that kind appear as tap-to-fill chips. Category is optional and tucked behind "Add Category". The Open Library lookup only runs for books.
+
+The stored fields are still `author` (shown as By) and `book` (shown as From), plus `kind`, so older data and backups load unchanged; anything saved before kinds existed reads as a Book.
+
 **Backup.** Settings → Export shares every nugget as JSON. Import merges by id: new nuggets are added, existing ones are replaced only when the backup copy is newer, and the 21-active limit still applies.

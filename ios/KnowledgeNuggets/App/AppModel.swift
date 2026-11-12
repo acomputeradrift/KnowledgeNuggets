@@ -77,10 +77,11 @@ final class AppModel {
     }
 
     /// Adds or updates a nugget. Returns a message to show when the nugget was
-    /// saved inactive because the rotation is full.
+    /// saved inactive because the rotation is full. Does nothing unless the draft
+    /// has content and, except for affirmations, a By or From.
     @discardableResult
     func save(_ draft: NuggetDraft, editing nugget: Nugget? = nil) -> String? {
-        guard draft.isValid else { return nil }
+        guard draft.canSave else { return nil }
         var message: String?
         do {
             let saved: Nugget
@@ -135,10 +136,38 @@ final class AppModel {
         reschedule()
     }
 
+    /// A source used before, for the editor's tap-to-fill suggestions.
+    struct RecentSource: Hashable, Identifiable {
+        var from: String
+        var by: String?
+        var id: String { from.lowercased() }
+    }
+
+    /// Distinct "From" values for this kind, most recently changed first,
+    /// narrowed to ones containing `matching` when it isn't empty.
+    func recentSources(for kind: NuggetKind, matching query: String = "", limit: Int = 5) -> [RecentSource] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var seen = Set<String>()
+        var result: [RecentSource] = []
+        for nugget in (active + inactive).sorted(by: { $0.updatedAt > $1.updatedAt }) {
+            guard nugget.nuggetKind == kind, let from = nugget.book else { continue }
+            let key = from.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            if !query.isEmpty {
+                guard from.localizedCaseInsensitiveContains(query), key != query.lowercased() else { continue }
+            }
+            result.append(RecentSource(from: from, by: nugget.author))
+            if result.count == limit { break }
+        }
+        return result
+    }
+
     // MARK: Metadata lookup
 
     private func lookUpMissingMetadata(for nugget: Nugget) {
-        guard let request = LookupRequest(author: nugget.author, book: nugget.book) else { return }
+        guard nugget.nuggetKind.supportsLookup,
+              let request = LookupRequest(author: nugget.author, book: nugget.book) else { return }
         let id = nugget.id
         let lookup = self.lookup
         lookupTask = Task { [weak self] in

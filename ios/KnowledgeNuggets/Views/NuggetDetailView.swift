@@ -31,6 +31,9 @@ struct NuggetDetailView: View {
                             .accessibilityElement(children: .combine)
 
                             HStack(spacing: 8) {
+                                Label(nugget.nuggetKind.title, systemImage: nugget.nuggetKind.symbol)
+                                    .font(.footnote.weight(.medium))
+                                    .foregroundStyle(.secondary)
                                 if let category = nugget.category {
                                     Text(category)
                                         .font(.footnote.weight(.medium))
@@ -39,7 +42,7 @@ struct NuggetDetailView: View {
                                         .background(.tint.opacity(0.15), in: Capsule())
                                         .accessibilityLabel("Category: \(category)")
                                 }
-                                Text(nugget.isActive ? "In rotation" : "Inactive")
+                                Text(nugget.isActive ? "· In rotation" : "· Inactive")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }

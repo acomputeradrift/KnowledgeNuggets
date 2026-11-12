@@ -10,6 +10,8 @@ struct NuggetBackup: Codable, Equatable, Sendable {
         var author: String?
         var book: String?
         var category: String?
+        /// Missing in backups made before kinds existed; those were books.
+        var kind: String?
         var isActive: Bool
         var sortOrder: Int
         var createdAt: Date
@@ -60,11 +62,18 @@ extension NuggetBackup.Item {
             author: nugget.author,
             book: nugget.book,
             category: nugget.category,
+            kind: nugget.kind,
             isActive: nugget.isActive,
             sortOrder: nugget.sortOrder,
             createdAt: nugget.createdAt,
             updatedAt: nugget.updatedAt
         )
+    }
+}
+
+extension NuggetBackup.Item {
+    var resolvedKind: NuggetKind {
+        kind.map { NuggetKind(storedValue: $0) } ?? .default
     }
 }
 

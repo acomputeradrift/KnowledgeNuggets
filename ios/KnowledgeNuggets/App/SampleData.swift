@@ -26,7 +26,9 @@ enum SampleData {
             book: "High Output Management",
             category: "Work"
         ),
-        NuggetDraft(text: "Slow is smooth, and smooth is fast."),
+        NuggetDraft(text: "Do. Or do not. There is no try.", author: "Yoda", book: "The Empire Strikes Back", kind: .movie),
+        NuggetDraft(text: "I am calm, focused and ready for today.", kind: .affirmation),
+        NuggetDraft(text: "Slow is smooth, and smooth is fast.", author: "U.S. Navy SEALs", kind: .quote),
     ]
 
     static func seed(into store: NuggetStore) {
@@ -36,7 +38,8 @@ enum SampleData {
         _ = try? store.add(
             NuggetDraft(
                 text: "The best time to plant a tree was twenty years ago. The second best time is now.",
-                category: "Proverb"
+                author: "Chinese proverb",
+                kind: .quote
             ),
             active: false
         )

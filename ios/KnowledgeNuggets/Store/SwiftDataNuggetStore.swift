@@ -71,9 +71,10 @@ final class SwiftDataNuggetStore: NuggetStore {
         let makeActive = active && room
         let nugget = Nugget(
             text: draft.trimmedText,
-            author: NuggetDraft.clean(draft.author),
-            book: NuggetDraft.clean(draft.book),
+            author: draft.storedAuthor,
+            book: draft.storedBook,
             category: NuggetDraft.clean(draft.category),
+            kind: draft.kind,
             isActive: makeActive,
             sortOrder: makeActive ? try nextSortOrder() : 0,
             createdAt: timestamp,
@@ -87,9 +88,10 @@ final class SwiftDataNuggetStore: NuggetStore {
 
     func update(_ nugget: Nugget, with draft: NuggetDraft) throws {
         nugget.text = draft.trimmedText
-        nugget.author = NuggetDraft.clean(draft.author)
-        nugget.book = NuggetDraft.clean(draft.book)
+        nugget.author = draft.storedAuthor
+        nugget.book = draft.storedBook
         nugget.category = NuggetDraft.clean(draft.category)
+        nugget.nuggetKind = draft.kind
         nugget.updatedAt = now()
         try context.save()
     }
@@ -172,6 +174,7 @@ final class SwiftDataNuggetStore: NuggetStore {
                 existing.author = NuggetDraft.clean(item.author ?? "")
                 existing.book = NuggetDraft.clean(item.book ?? "")
                 existing.category = NuggetDraft.clean(item.category ?? "")
+                existing.nuggetKind = item.resolvedKind
                 existing.updatedAt = item.updatedAt
                 if item.isActive && !existing.isActive {
                     if activeTotal < NuggetRules.activeLimit {
@@ -199,6 +202,7 @@ final class SwiftDataNuggetStore: NuggetStore {
                     author: NuggetDraft.clean(item.author ?? ""),
                     book: NuggetDraft.clean(item.book ?? ""),
                     category: NuggetDraft.clean(item.category ?? ""),
+                    kind: item.resolvedKind,
                     isActive: makeActive,
                     sortOrder: makeActive ? nextOrder : 0,
                     createdAt: item.createdAt,
