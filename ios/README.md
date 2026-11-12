@@ -17,7 +17,7 @@ Run `xcodegen generate` again after adding, moving or deleting files.
 
 ### Running on your iPhone
 
-Set your Apple team in `project.yml` (`DEVELOPMENT_TEAM`) and regenerate, or pick the team under Signing & Capabilities in Xcode. With a free Apple ID the install expires after 7 days; a paid developer account lasts a year.
+The Apple team is set in `project.yml` (`DEVELOPMENT_TEAM`), so a regenerated project keeps signing. Change it there, not in Xcode. With a free Apple ID the install expires after 7 days; a paid developer account lasts a year.
 
 ### Tests
 
