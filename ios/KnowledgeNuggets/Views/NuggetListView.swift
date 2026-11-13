@@ -56,20 +56,20 @@ struct NuggetListView: View {
                 case .edit(let nugget): NuggetEditorView(nugget: nugget)
                 }
             }
-            .confirmationDialog(
-                "Delete this nugget?",
+            .alert(
+                "Delete Nugget?",
                 isPresented: Binding(
                     get: { pendingDelete != nil },
                     set: { if !$0 { pendingDelete = nil } }
                 ),
-                titleVisibility: .visible,
                 presenting: pendingDelete
             ) { nugget in
-                Button("Delete Nugget", role: .destructive) {
+                Button("Delete", role: .destructive) {
                     withAnimation { model.delete(nugget) }
                 }
-            } message: { _ in
-                Text("This can't be undone.")
+                Button("Cancel", role: .cancel) {}
+            } message: { nugget in
+                Text(Self.deletePreview(nugget.text))
             }
             .alert(
                 "Rotation Is Full",
@@ -158,6 +158,16 @@ struct NuggetListView: View {
         .accessibilityAction(named: "Delete") {
             pendingDelete = nugget
         }
+    }
+}
+
+extension NuggetListView {
+    /// Short single-line preview of a nugget's text for the delete alert.
+    static func deletePreview(_ text: String, limit: Int = 80) -> String {
+        let flat = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard flat.count > limit else { return flat }
+        return String(flat.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…"
     }
 }
 
