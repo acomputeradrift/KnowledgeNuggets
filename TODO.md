@@ -9,7 +9,7 @@
 - [x] **The delete confirmation looked different from the app's other popups and pointed at the wrong nugget.** Fixed: it's now a centered alert showing a preview of the nugget's text.
 
 ### To discuss first
-- [ ] **Make adding a nugget exciting.**
+- [x] **Make adding a nugget exciting.**
   - Haptics and a prominent green check.
   - Encourage people to fill all 21 spots at the start.
   - The same green check and text whichever list the new nugget joins.
