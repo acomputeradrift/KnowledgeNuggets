@@ -16,6 +16,8 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab: AppTab
     @State private var openedNugget: NuggetLink?
+    /// The app's one confirmation toast, shown above everything, sheets included.
+    @State private var toasts = ToastCenter()
 
     init(initialTab: AppTab = .today) {
         _tab = State(initialValue: initialTab)
@@ -74,6 +76,8 @@ struct RootView: View {
             actions: { Button("OK", role: .cancel) {} },
             message: { Text(model.errorMessage ?? "") }
         )
+        .toastWindow(toasts)
+        .environment(toasts)
     }
 }
 

@@ -4,6 +4,7 @@ struct NuggetEditorView: View {
     let nugget: Nugget?
 
     @Environment(AppModel.self) private var model
+    @Environment(ToastCenter.self) private var toasts: ToastCenter?
     @Environment(\.dismiss) private var dismiss
     @AppStorage("lastNuggetKind") private var lastKind = NuggetKind.default.rawValue
     @State private var draft: NuggetDraft
@@ -182,14 +183,39 @@ struct NuggetEditorView: View {
 
     private func save() {
         guard draft.canSave else { return }
-        if nugget == nil { lastKind = draft.kind.rawValue }
-        // Edits, and saves that fail, close as before. New nuggets celebrate.
-        guard let result = model.save(draft, editing: nugget), nugget == nil else {
+        if let nugget {
+            // Edits close, then confirm once the sheet is out of the way.
+            let result = model.update(nugget, with: draft)
+            dismiss()
+            if let result { confirmAfterDismissal(result) }
+            return
+        }
+        lastKind = draft.kind.rawValue
+        // Saves that fail close as before. New nuggets celebrate.
+        guard let result = model.save(draft) else {
             dismiss()
             return
         }
         focus = nil
         celebration = result
+    }
+
+    /// Shows the edit's confirmation after the sheet has slid away. A flipped
+    /// Active switch confirms the move, with Undo, like the list's swipe.
+    private func confirmAfterDismissal(_ result: AppModel.EditResult) {
+        guard let toasts else { return }
+        let model = self.model
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            switch result {
+            case .updated:
+                toasts.show("Nugget updated")
+            case .moved(let move):
+                toasts.show(move.message, successHaptic: move.isActive) {
+                    NuggetListView.undo(move, model: model, onRefused: { model.errorMessage = $0 })
+                }
+            }
+        }
     }
 
     /// Back to a fresh form that keeps the kind and source, so several nuggets
@@ -276,4 +302,5 @@ struct RecentSourcesRow: View {
 #Preview("New") {
     NuggetEditorView(nugget: nil)
         .environment(PreviewSupport.model())
+        .environment(ToastCenter())
 }

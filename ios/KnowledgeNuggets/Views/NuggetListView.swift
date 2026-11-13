@@ -15,6 +15,7 @@ enum EditorRoute: Identifiable {
 
 struct NuggetListView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ToastCenter.self) private var toasts: ToastCenter?
     @State private var editor: EditorRoute?
     @State private var pendingDelete: Nugget?
     @State private var limitMessage: String?
@@ -65,7 +66,8 @@ struct NuggetListView: View {
                 presenting: pendingDelete
             ) { nugget in
                 Button("Delete", role: .destructive) {
-                    withAnimation { model.delete(nugget) }
+                    let deleted = withAnimation(.snappy) { model.delete(nugget) }
+                    if deleted { toasts?.show("Nugget deleted") }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { nugget in
@@ -80,6 +82,7 @@ struct NuggetListView: View {
                 actions: { Button("OK", role: .cancel) {} },
                 message: { Text(limitMessage ?? "") }
             )
+            .sensoryFeedback(.warning, trigger: limitMessage) { _, new in new != nil }
         }
     }
 
@@ -91,7 +94,7 @@ struct NuggetListView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(model.active) { nugget in
+                    ForEach(model.active, id: \.activeRowID) { nugget in
                         row(for: nugget)
                     }
                     .onMove { source, destination in
@@ -106,7 +109,7 @@ struct NuggetListView: View {
 
             if !model.inactive.isEmpty {
                 Section("Inactive") {
-                    ForEach(model.inactive) { nugget in
+                    ForEach(model.inactive, id: \.inactiveRowID) { nugget in
                         row(for: nugget)
                     }
                 }
@@ -125,14 +128,14 @@ struct NuggetListView: View {
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             if nugget.isActive {
                 Button {
-                    withAnimation { _ = model.setActive(nugget, false) }
+                    moveAfterSwipeCloses(nugget, toActive: false)
                 } label: {
                     Label("Deactivate", systemImage: "pause.circle")
                 }
                 .tint(.gray)
             } else {
                 Button {
-                    withAnimation { limitMessage = model.setActive(nugget, true) }
+                    moveAfterSwipeCloses(nugget, toActive: true)
                 } label: {
                     Label("Activate", systemImage: "play.circle")
                 }
@@ -149,11 +152,7 @@ struct NuggetListView: View {
             .tint(.red)
         }
         .accessibilityAction(named: nugget.isActive ? "Deactivate" : "Activate") {
-            if nugget.isActive {
-                _ = model.setActive(nugget, false)
-            } else {
-                limitMessage = model.setActive(nugget, true)
-            }
+            move(nugget, toActive: !nugget.isActive)
         }
         .accessibilityAction(named: "Delete") {
             pendingDelete = nugget
@@ -161,7 +160,52 @@ struct NuggetListView: View {
     }
 }
 
+// MARK: Moving between Active and Inactive
+
+private extension Nugget {
+    /// Row ids that differ by section, so a move between sections is a plain
+    /// remove here and insert there rather than a cross-section move.
+    var activeRowID: String { "active-\(id.uuidString)" }
+    var inactiveRowID: String { "inactive-\(id.uuidString)" }
+}
+
 extension NuggetListView {
+    /// About how long a swipe action takes to slide closed. Moving the row while
+    /// it's still sliding back makes it shrink away half-open; waiting lets the
+    /// swipe finish, then the row leaves in one animation. (The row ids above
+    /// stop the other glitch: the row flying up off the top and back.)
+    static let swipeCloseDelay: Duration = .milliseconds(300)
+
+    private func moveAfterSwipeCloses(_ nugget: Nugget, toActive isActive: Bool) {
+        Task { @MainActor in
+            try? await Task.sleep(for: Self.swipeCloseDelay)
+            move(nugget, toActive: isActive)
+        }
+    }
+
+    /// Moves the nugget with one animation and confirms it, or explains why the
+    /// rotation can't take it. Used by the swipe and accessibility actions.
+    private func move(_ nugget: Nugget, toActive isActive: Bool) {
+        let result = withAnimation(.snappy) { model.move(nugget, toActive: isActive) }
+        switch result {
+        case .moved(let move):
+            toasts?.show(move.message, successHaptic: move.isActive) { [model] in
+                Self.undo(move, model: model, onRefused: { limitMessage = $0 })
+            }
+        case .rotationFull(let message):
+            limitMessage = message
+        case .unchanged, .failed:
+            break
+        }
+    }
+
+    /// Undo for a move, wherever it was made (the list or the editor).
+    @MainActor
+    static func undo(_ move: AppModel.ActiveMove, model: AppModel, onRefused: (String) -> Void) {
+        if let message = withAnimation(.snappy, { model.undo(move) }) {
+            onRefused(message)
+        }
+    }
     /// Short single-line preview of a nugget's text for the delete alert.
     static func deletePreview(_ text: String, limit: Int = 80) -> String {
         let flat = text.split(whereSeparator: \.isNewline).joined(separator: " ")
@@ -198,4 +242,5 @@ struct NuggetRow: View {
 #Preview {
     NuggetListView()
         .environment(PreviewSupport.model())
+        .environment(ToastCenter())
 }

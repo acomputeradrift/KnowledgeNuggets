@@ -101,57 +101,172 @@ final class AppModel {
 
     /// Adds or updates a nugget. For a new nugget, returns what to celebrate:
     /// the active count after the save and where it went (the rotation, or
-    /// Inactive because the rotation was full or the switch was off). An edit
-    /// that flips the Active switch goes through `setActive`, with the
-    /// same rules as the list's swipe action. Returns nil after an edit or when
-    /// nothing was saved.
+    /// Inactive because the rotation was full or the switch was off). Edits go
+    /// through `update(_:with:)` and return nil here, as does a save that fails.
     /// Does nothing unless the draft has content and, except for affirmations,
     /// a By or From.
     @discardableResult
     func save(_ draft: NuggetDraft, editing nugget: Nugget? = nil) -> SaveCelebration? {
         guard draft.canSave else { return nil }
-        var outcome: ActivationOutcome?
+        if let nugget {
+            update(nugget, with: draft)
+            return nil
+        }
         do {
-            let saved: Nugget
-            if let nugget {
-                try store.update(nugget, with: draft)
-                if draft.isActive != nugget.isActive {
-                    // Refused (rotation full) leaves it inactive; the editor disables the switch then.
-                    try store.setActive(nugget, draft.isActive)
-                }
-                saved = nugget
-            } else {
-                let (added, result) = try store.add(draft, active: draft.isActive)
-                saved = added
-                outcome = result
-            }
+            let (added, outcome) = try store.add(draft, active: draft.isActive)
             didChange()
-            lookUpMissingMetadata(for: saved)
+            lookUpMissingMetadata(for: added)
+            return SaveCelebration(activeCount: active.count, outcome: outcome)
         } catch {
             errorMessage = "Couldn't save the nugget. \(error.localizedDescription)"
             return nil
         }
-        return outcome.map { SaveCelebration(activeCount: active.count, outcome: $0) }
     }
 
+    /// What an edit did, for its confirmation.
+    enum EditResult: Equatable {
+        case updated
+        /// The edit also flipped the Active switch.
+        case moved(ActiveMove)
+    }
+
+    /// Saves an edit. A flipped Active switch goes through the same rules as the
+    /// list's swipe action. Returns nil when nothing was saved.
     @discardableResult
-    func setActive(_ nugget: Nugget, _ isActive: Bool) -> String? {
+    func update(_ nugget: Nugget, with draft: NuggetDraft) -> EditResult? {
+        guard draft.canSave else { return nil }
+        let before = MoveOrigin(nugget, in: self)
+        var result = EditResult.updated
         do {
-            let outcome = try store.setActive(nugget, isActive)
+            try store.update(nugget, with: draft)
+            if draft.isActive != nugget.isActive {
+                // Refused (rotation full) leaves it inactive; the editor disables the switch then.
+                let outcome = try store.setActive(nugget, draft.isActive)
+                if outcome != .keptInactiveLimitReached {
+                    result = .moved(before.move(to: draft.isActive))
+                }
+            }
             didChange()
-            return outcome.message
+            lookUpMissingMetadata(for: nugget)
         } catch {
-            errorMessage = "Couldn't update the nugget. \(error.localizedDescription)"
+            errorMessage = "Couldn't save the nugget. \(error.localizedDescription)"
             return nil
+        }
+        return result
+    }
+
+    // MARK: Moving between Active and Inactive
+
+    /// A move between Active and Inactive, with what's needed to undo it.
+    struct ActiveMove: Equatable {
+        let nuggetID: UUID
+        /// Where it went: true when it moved into the rotation.
+        let isActive: Bool
+        /// Its position in the list it left.
+        let previousIndex: Int
+        /// Its `deactivatedAt` before the move, which places it in the Inactive list.
+        let previousDeactivatedAt: Date?
+
+        var message: String { isActive ? "Moved to Active" : "Moved to Inactive" }
+    }
+
+    enum MoveResult: Equatable {
+        case moved(ActiveMove)
+        /// Refused because the rotation is full; the message explains it.
+        case rotationFull(String)
+        /// Already there.
+        case unchanged
+        /// The store failed; `errorMessage` says so.
+        case failed
+    }
+
+    /// Where a nugget sat before a move.
+    private struct MoveOrigin {
+        let id: UUID
+        let index: Int
+        let deactivatedAt: Date?
+
+        @MainActor
+        init(_ nugget: Nugget, in model: AppModel) {
+            let list = nugget.isActive ? model.active : model.inactive
+            id = nugget.id
+            index = list.firstIndex { $0.id == nugget.id } ?? list.count
+            deactivatedAt = nugget.deactivatedAt
+        }
+
+        func move(to isActive: Bool) -> ActiveMove {
+            ActiveMove(nuggetID: id, isActive: isActive, previousIndex: index, previousDeactivatedAt: deactivatedAt)
         }
     }
 
-    func delete(_ nugget: Nugget) {
+    /// Moves a nugget into or out of the rotation, by the store's rules: moving
+    /// in appends to the rotation unless it's full, moving out stamps `deactivatedAt`.
+    func move(_ nugget: Nugget, toActive isActive: Bool) -> MoveResult {
+        guard nugget.isActive != isActive else { return .unchanged }
+        let before = MoveOrigin(nugget, in: self)
+        do {
+            let outcome = try store.setActive(nugget, isActive)
+            if outcome == .keptInactiveLimitReached {
+                return .rotationFull(outcome.message ?? NuggetRules.activeLimitReachedNote)
+            }
+            didChange()
+            return .moved(before.move(to: isActive))
+        } catch {
+            errorMessage = "Couldn't update the nugget. \(error.localizedDescription)"
+            return .failed
+        }
+    }
+
+    /// Returns the limit message when it was refused, nil otherwise.
+    @discardableResult
+    func setActive(_ nugget: Nugget, _ isActive: Bool) -> String? {
+        if case .rotationFull(let message) = move(nugget, toActive: isActive) { return message }
+        return nil
+    }
+
+    /// Puts a moved nugget back where it was: the same state, and the same
+    /// position in that list when it can. Returns a message when the rotation
+    /// filled up meanwhile, so it can't go back in. Does nothing if it has
+    /// been moved again or deleted since.
+    @discardableResult
+    func undo(_ move: ActiveMove) -> String? {
+        guard let nugget = try? store.nugget(id: move.nuggetID), nugget.isActive == move.isActive else { return nil }
+        do {
+            if move.isActive {
+                // Back to Inactive, in the place it waited before.
+                try store.setActive(nugget, false)
+                nugget.deactivatedAt = move.previousDeactivatedAt
+                try store.update(nugget, with: NuggetDraft(nugget))
+            } else {
+                // Back into the rotation, then from the end to where it was.
+                guard try store.setActive(nugget, true) == .active else {
+                    return "The rotation filled up, so this nugget can't go back in. Deactivate another to make room."
+                }
+                let ordered = try store.activeNuggets()
+                if let from = ordered.firstIndex(where: { $0.id == nugget.id }) {
+                    let target = min(move.previousIndex, ordered.count - 1)
+                    if from != target {
+                        try store.moveActive(fromOffsets: [from], toOffset: target)
+                    }
+                }
+            }
+            didChange()
+        } catch {
+            errorMessage = "Couldn't undo. \(error.localizedDescription)"
+        }
+        return nil
+    }
+
+    /// Returns true when it was deleted.
+    @discardableResult
+    func delete(_ nugget: Nugget) -> Bool {
         do {
             try store.delete(nugget)
             didChange()
+            return true
         } catch {
             errorMessage = "Couldn't delete the nugget. \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -304,14 +419,30 @@ final class AppModel {
         return NuggetBackupFile(data: data, fileName: "KnowledgeNuggets-\(stamp).json")
     }
 
+    enum ImportResult: Equatable {
+        case imported(ImportSummary)
+        case failed(String)
+
+        var message: String {
+            switch self {
+            case .imported(let summary): return summary.message
+            case .failed(let message): return message
+            }
+        }
+    }
+
     func importBackup(from data: Data) -> String {
+        importBackupResult(from: data).message
+    }
+
+    func importBackupResult(from data: Data) -> ImportResult {
         do {
             let backup = try NuggetBackup.decode(data)
             let summary = try store.importBackup(backup)
             didChange()
-            return summary.message
+            return .imported(summary)
         } catch {
-            return "That file isn't a Knowledge Nuggets backup. \(error.localizedDescription)"
+            return .failed("That file isn't a Knowledge Nuggets backup. \(error.localizedDescription)")
         }
     }
 }

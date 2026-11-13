@@ -1,11 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ToastCenter.self) private var toasts: ToastCenter?
     @Environment(\.openURL) private var openURL
     @State private var isImporting = false
     @State private var importMessage: String?
+    /// Waits for the time picker to settle before confirming the new time.
+    @State private var timeConfirmation: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -20,7 +24,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
-                importMessage = handleImport(result)
+                handleImport(result)
             }
             .alert(
                 "Import",
@@ -43,7 +47,13 @@ struct SettingsView: View {
 
             if model.authorizationStatus == .notDetermined {
                 Button("Turn On Notifications") {
-                    Task { await model.enableNotifications() }
+                    Task {
+                        await model.enableNotifications()
+                        // Denied keeps the footer's explanation and the Open iOS Settings button.
+                        if Self.allowsNotifications(model.authorizationStatus) {
+                            toasts?.show("Notifications on")
+                        }
+                    }
                 }
             } else if model.authorizationStatus == .denied {
                 Button("Open iOS Settings") {
@@ -84,14 +94,20 @@ struct SettingsView: View {
     private var timeBinding: Binding<Date> {
         Binding(
             get: { model.settings.timeOfDay(calendar: model.calendar, now: .now) },
-            set: { newValue in Task { await model.setDailyTime(newValue) } }
+            set: { newValue in
+                Task { await model.setDailyTime(newValue) }
+                confirmTimeWhenSettled()
+            }
         )
     }
 
     private var pausedBinding: Binding<Bool> {
         Binding(
             get: { model.settings.isPaused },
-            set: { model.setPaused($0) }
+            set: { paused in
+                model.setPaused(paused)
+                toasts?.show(paused ? "Notifications paused" : "Notifications resumed")
+            }
         )
     }
 
@@ -112,22 +128,55 @@ struct SettingsView: View {
         }
     }
 
-    private func handleImport(_ result: Result<URL, Error>) -> String {
+    /// The picker reports every wheel stop, so confirm only once it's been still for a moment.
+    private func confirmTimeWhenSettled() {
+        timeConfirmation?.cancel()
+        timeConfirmation = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            let time = model.settings.timeOfDay(calendar: model.calendar, now: .now)
+                .formatted(date: .omitted, time: .shortened)
+            toasts?.show("Daily nugget set for \(time)")
+        }
+    }
+
+    static func allowsNotifications(_ status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional, .ephemeral: return true
+        default: return false
+        }
+    }
+
+    /// A clean import confirms with a short toast. Failures, and imports that
+    /// left nuggets out of the full rotation, keep the alert so they can be read.
+    private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .failure(let error):
-            return "Couldn't open the file. \(error.localizedDescription)"
+            importMessage = "Couldn't open the file. \(error.localizedDescription)"
         case .success(let url):
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url) else {
-                return "Couldn't read the file."
+                importMessage = "Couldn't read the file."
+                return
             }
-            return model.importBackup(from: data)
+            switch model.importBackupResult(from: data) {
+            case .imported(let summary) where summary.keptInactive == 0 && toasts != nil:
+                toasts?.show(Self.importToast(summary))
+            case let other:
+                importMessage = other.message
+            }
         }
+    }
+
+    static func importToast(_ summary: ImportSummary) -> String {
+        if summary.added == 0 && summary.updated == 0 { return "Backup imported, nothing new" }
+        return "Imported \(summary.added) new, \(summary.updated) updated"
     }
 }
 
 #Preview {
     SettingsView()
         .environment(PreviewSupport.model())
+        .environment(ToastCenter())
 }

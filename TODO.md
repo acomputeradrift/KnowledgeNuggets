@@ -20,5 +20,14 @@
 - [x] **Order the Inactive list.** Nuggets added while the rotation was full go at the top, oldest first. Nuggets the user moved out on purpose go at the bottom. (Today the most recently changed nugget sits at the top, which is the wrong way round.)
 - [x] **"Active" switch on the add/edit form** (the app's terms are Active and Inactive). Done: the switch and its label grey out when 21 are active, with the note "21 nuggets are already active. Make one inactive first."
 
+### Feedback round (from testing on the phone)
+- [x] **The add-nugget celebration closes too fast to read.** Keep it up longer, and play a standard approval sound along with the haptic.
+- [x] **Haptic when moving a nugget from Inactive to Active.**
+- [x] **Moving between Active and Inactive should look the same both ways.** Fix the clunky animation and show a short confirmation instead of the row just disappearing. Only Inactive to Active gets the haptic.
+- [x] **Every action the user starts confirms that it worked (except reordering).** This covers editing, deleting, moving, the Settings changes and import. Adding has its own celebration.
+
+### Open
+- [ ] **Choose the success sound.** It's currently the original two-note ding, which you don't love. You're auditioning the iOS and Mac sounds.
+
 ## v2 ideas
 - [ ] **Search Nuggets:** browse and add nuggets shared by the community. This needs a backend, so it's out of scope for the local-only v1.
