@@ -12,6 +12,11 @@ final class AppModel {
     private(set) var settings: AppSettings
     private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     private(set) var scheduledCount = 0
+    /// The start of the current day. Observed, so the Today screen re-renders
+    /// when it moves on. The injected clock isn't observable on its own, and a
+    /// suspended app can stay in memory overnight, so `refreshDay()` is called
+    /// on activation, at midnight and on time zone or clock changes.
+    private(set) var today: Date
     /// Set when a store call fails, so a screen can say so.
     var errorMessage: String?
 
@@ -39,6 +44,7 @@ final class AppModel {
         self.defaults = defaults
         self.calendar = calendar
         self.now = now
+        self.today = calendar.startOfDay(for: now())
         self.settings = AppSettings.load(from: defaults)
         reload()
     }
@@ -48,17 +54,34 @@ final class AppModel {
     // MARK: Rotation
 
     /// The rotation start, or today if notifications haven't been scheduled yet.
-    var rotationStart: Date { settings.rotationStart ?? now() }
+    var rotationStart: Date { settings.rotationStart ?? today }
 
     var todayNugget: Nugget? {
-        RotationEngine.item(for: now(), in: active, start: rotationStart, calendar: calendar)
+        RotationEngine.item(for: today, in: active, start: rotationStart, calendar: calendar)
     }
 
     /// Tomorrow's nugget, when it differs from today's.
     var upNextNugget: Nugget? {
         guard active.count > 1,
-              let tomorrow = calendar.date(byAdding: .day, value: 1, to: now()) else { return nil }
+              let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return nil }
         return RotationEngine.item(for: tomorrow, in: active, start: rotationStart, calendar: calendar)
+    }
+
+    /// Moves `today` on to the clock's current day. Returns true when the day changed.
+    /// Only assigns when it differs, so views don't re-render needlessly.
+    @discardableResult
+    func refreshDay() -> Bool {
+        let current = calendar.startOfDay(for: now())
+        guard current != today else { return false }
+        today = current
+        return true
+    }
+
+    /// Called at midnight and when the clock or time zone changes while the app runs.
+    /// Moves Today on and rebuilds the schedule, since fire dates are local times.
+    func timeDidChange() {
+        refreshDay()
+        reschedule()
     }
 
     // MARK: Nuggets
@@ -244,8 +267,9 @@ final class AppModel {
     }
 
     private func performReschedule() async {
+        refreshDay()
         if settings.rotationStart == nil {
-            settings.rotationStart = calendar.startOfDay(for: now())
+            settings.rotationStart = today
             settings.save(to: defaults)
         }
         authorizationStatus = await scheduler.authorizationStatus()
@@ -256,6 +280,7 @@ final class AppModel {
 
     /// Called whenever the app comes to the foreground.
     func appBecameActive() async {
+        refreshDay()
         settings = AppSettings.load(from: defaults)
         reload()
         await rescheduleNow()

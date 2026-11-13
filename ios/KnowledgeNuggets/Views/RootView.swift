@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum AppTab: String, Hashable {
     case today, nuggets, settings
@@ -38,13 +39,31 @@ struct RootView: View {
         }
         .onChange(of: router.pendingNuggetID, initial: true) { _, id in
             guard let id else { return }
+            // A tapped notification can open the app before the scene goes active.
+            model.refreshDay()
             openedNugget = NuggetLink(id: id)
             router.pendingNuggetID = nil
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
+                // Move Today on before the first frame; the rest can follow.
+                model.refreshDay()
                 Task { await model.appBecameActive() }
             }
+        }
+        // The app can stay in memory overnight, so catch midnight and clock or
+        // time zone changes while it's running too.
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            model.timeDidChange()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSCalendarDayChanged)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            model.timeDidChange()
         }
         .alert(
             "Something Went Wrong",

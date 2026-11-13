@@ -121,6 +121,112 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.active.first?.author)
     }
 
+    // MARK: Day changes
+
+    private func makeModel(clock: TestClock) -> AppModel {
+        AppModel(
+            store: SwiftDataNuggetStore(context: container.mainContext),
+            scheduler: NotificationScheduler(center: center, calendar: calendar, now: { clock.now }),
+            lookup: FakeLookup(),
+            defaults: defaults,
+            calendar: calendar,
+            now: { clock.now }
+        )
+    }
+
+    func testTodayIsTheStartOfTheClocksDay() {
+        let clock = TestClock(date(2026, 1, 1, 18, in: calendar))
+        let model = makeModel(clock: clock)
+        XCTAssertEqual(model.today, date(2026, 1, 1, 0, in: calendar))
+    }
+
+    func testRefreshAfterMidnightMovesTodayOn() async {
+        center.setStatus(.authorized)
+        let clock = TestClock(date(2026, 1, 1, 22, in: calendar))
+        let model = makeModel(clock: clock)
+        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name, kind: .affirmation)) }
+        await model.rescheduleNow()
+        XCTAssertEqual(model.todayNugget?.text, "A")
+        XCTAssertEqual(model.upNextNugget?.text, "B")
+
+        // Still the same day: nothing moves.
+        clock.now = date(2026, 1, 1, 23, 59, in: calendar)
+        XCTAssertFalse(model.refreshDay())
+        XCTAssertEqual(model.todayNugget?.text, "A")
+
+        // Past midnight, but before anything tells the model: the shown day is
+        // the observed one, so it only changes on refresh.
+        clock.now = date(2026, 1, 2, 7, in: calendar)
+        XCTAssertEqual(model.todayNugget?.text, "A")
+        XCTAssertTrue(model.refreshDay())
+        XCTAssertEqual(model.today, date(2026, 1, 2, 0, in: calendar))
+        XCTAssertEqual(model.todayNugget?.text, "B")
+        XCTAssertEqual(model.upNextNugget?.text, "C")
+        XCTAssertFalse(model.refreshDay(), "A second refresh on the same day changes nothing")
+    }
+
+    func testBecomingActiveTheNextMorningMovesTodayOn() async {
+        let clock = TestClock(date(2026, 1, 1, 9, in: calendar))
+        let model = makeModel(clock: clock)
+        for name in ["A", "B"] { model.save(NuggetDraft(text: name, kind: .affirmation)) }
+        await model.rescheduleNow()
+        XCTAssertEqual(model.todayNugget?.text, "A")
+
+        clock.now = date(2026, 1, 2, 8, in: calendar)
+        await model.appBecameActive()
+        XCTAssertEqual(model.todayNugget?.text, "B")
+        XCTAssertEqual(model.upNextNugget?.text, "A")
+    }
+
+    func testTimeDidChangeMovesTodayOnAndReschedules() async {
+        center.setStatus(.authorized)
+        let clock = TestClock(date(2026, 1, 1, 23, in: calendar))
+        let model = makeModel(clock: clock)
+        for name in ["A", "B"] { model.save(NuggetDraft(text: name, kind: .affirmation)) }
+        await model.rescheduleNow()
+
+        clock.now = date(2026, 1, 2, 0, 0, in: calendar)
+        model.timeDidChange()
+        await model.rescheduleNow()
+        XCTAssertEqual(model.todayNugget?.text, "B")
+        XCTAssertFalse(center.pending.contains { $0.identifier == "nugget-2026-01-01" })
+    }
+
+    func testRotationIsAnchoredWhileTheDayMovesOn() async {
+        let clock = TestClock(date(2026, 1, 1, 9, in: calendar))
+        let model = makeModel(clock: clock)
+        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name, kind: .affirmation)) }
+        await model.rescheduleNow()
+        XCTAssertEqual(model.settings.rotationStart, date(2026, 1, 1, 0, in: calendar))
+
+        clock.now = date(2026, 1, 3, 9, in: calendar)
+        model.refreshDay()
+        XCTAssertEqual(model.todayNugget?.text, "C")
+    }
+
+    func testTodaysNotificationMatchesTodayNugget() async {
+        center.setStatus(.authorized)
+        let clock = TestClock(date(2026, 1, 1, 6, in: calendar))
+        let model = makeModel(clock: clock)
+        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name, kind: .affirmation)) }
+        // Daily time 08:00, after the clock, so today's notification is queued.
+        await model.setDailyTime(date(2026, 1, 1, 8, in: calendar))
+        await model.rescheduleNow()
+
+        for day in 1...5 {
+            clock.now = date(2026, 1, day, 6, in: calendar)
+            await model.appBecameActive()
+            let identifier = String(format: "nugget-2026-01-%02d", day)
+            let request = center.pending.first { $0.identifier == identifier }
+            XCTAssertNotNil(request, "Today's notification is queued on day \(day)")
+            XCTAssertEqual(request?.content.body, model.todayNugget?.text, "Day \(day)")
+            XCTAssertEqual(
+                request.flatMap { NotificationScheduler.nuggetID(from: $0.content.userInfo) },
+                model.todayNugget?.id
+            )
+        }
+    }
+
     func testNoLookupWhenBothOrNeitherKnown() async {
         let model = makeModel(lookup: FakeLookup(authors: ["B": "Should not be used"]))
         model.save(NuggetDraft(text: "x", author: "A", book: "B"))

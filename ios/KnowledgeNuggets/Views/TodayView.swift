@@ -52,7 +52,7 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     if let today = model.todayNugget {
                         NuggetCard(
-                            heading: Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()),
+                            heading: model.today.formatted(.dateTime.weekday(.wide).month(.wide).day()),
                             nugget: today,
                             prominent: true
                         ) {
@@ -131,7 +131,7 @@ struct ScheduleStatusLabel: View {
     }
 
     private var time: String {
-        model.settings.timeOfDay(calendar: model.calendar, now: .now).formatted(date: .omitted, time: .shortened)
+        model.settings.timeOfDay(calendar: model.calendar, now: model.today).formatted(date: .omitted, time: .shortened)
     }
 
     private var symbol: String {

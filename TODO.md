@@ -3,8 +3,8 @@
 ## 2026-11-13
 
 ### In progress
-- [ ] **Today page didn't update to the new day.** The Today screen still showed yesterday's nugget the next morning.
-- [ ] **Add Lyrics as a kind of nugget.** It sits alongside Book, Movie, Show, Podcast, Quote, Affirmation and Other.
+- [x] **Today page didn't update to the new day.** The Today screen still showed yesterday's nugget the next morning. Fixed: it now refreshes at midnight, on clock or time zone changes, and when the app comes back to the front.
+- [x] **Add Lyrics as a kind of nugget.** It sits alongside Book, Movie, Show, Podcast, Quote, Affirmation and Other. Done: Artist and Song fields, no lookup.
 
 ### To discuss first
 - [ ] **Make adding a nugget exciting.**

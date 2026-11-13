@@ -78,3 +78,16 @@ struct FakeLookup: MetadataLookup {
     func author(forBook book: String) async -> String? { authors[book] }
     func book(forAuthor author: String) async -> String? { books[author] }
 }
+
+/// A clock tests can move forward, e.g. past midnight.
+final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _now: Date
+
+    init(_ now: Date) { _now = now }
+
+    var now: Date {
+        get { lock.withLock { _now } }
+        set { lock.withLock { _now = newValue } }
+    }
+}
