@@ -99,29 +99,32 @@ final class AppModel {
         try? store.nugget(id: id)
     }
 
-    /// Adds or updates a nugget. Returns a message to show when the nugget was
-    /// saved inactive because the rotation is full. Does nothing unless the draft
-    /// has content and, except for affirmations, a By or From.
+    /// Adds or updates a nugget. For a new nugget, returns what to celebrate:
+    /// the active count after the save and whether the rotation was full, so it
+    /// was saved inactive. Returns nil after an edit or when nothing was saved.
+    /// Does nothing unless the draft has content and, except for affirmations,
+    /// a By or From.
     @discardableResult
-    func save(_ draft: NuggetDraft, editing nugget: Nugget? = nil) -> String? {
+    func save(_ draft: NuggetDraft, editing nugget: Nugget? = nil) -> SaveCelebration? {
         guard draft.canSave else { return nil }
-        var message: String?
+        var outcome: ActivationOutcome?
         do {
             let saved: Nugget
             if let nugget {
                 try store.update(nugget, with: draft)
                 saved = nugget
             } else {
-                let (added, outcome) = try store.add(draft, active: true)
+                let (added, result) = try store.add(draft, active: true)
                 saved = added
-                message = outcome.message
+                outcome = result
             }
             didChange()
             lookUpMissingMetadata(for: saved)
         } catch {
             errorMessage = "Couldn't save the nugget. \(error.localizedDescription)"
+            return nil
         }
-        return message
+        return outcome.map { SaveCelebration(activeCount: active.count, outcome: $0) }
     }
 
     @discardableResult

@@ -14,14 +14,9 @@
   - Encourage people to fill all 21 spots at the start.
   - The same green check and text whichever list the new nugget joins.
   - A small note at the bottom saying where the nugget went in line.
-  - Decided: the note only ever talks about Active and Inactive, never "New". When the rotation is full: "Added as Inactive. It joins the rotation when a spot opens."
-  - Decided: the screen stays with Add Another / Done until the rotation is full, then closes by itself. Milestones at 1, 7, 14 and 21, with confetti at 21. iOS green check. No starter nuggets.
-  - In progress (agent dispatched).
-- [ ] **Three states: Active, New and Inactive.**
-  - Decided: "New" is internal only. People see just Active and Inactive, with Inactive ordered by the algorithm (queued new nuggets first).
-  - A new nugget goes to the bottom of the New list.
-  - A nugget made inactive goes to the bottom of the whole list. When that happens, the oldest New nugget moves to the bottom of the Active list.
-  - If New is empty, the oldest Inactive nugget moves to the bottom of Active instead.
+  - Done: green check, haptics, progress ring, milestones at 1, 7, 14 and 21 with confetti at 21, Add Another, and the note ("Added to the end of your rotation." or "Added as Inactive. Your rotation is full."). Not yet felt on the phone: haptics, Reduce Motion and VoiceOver.
+- [x] ~~**Three states: Active, New and Inactive.**~~ Dropped: nothing is ever pulled into the rotation automatically.
+- [ ] **Let the user choose the rotation size instead of a fixed 21.** Apple's limit (about 64 queued notifications) doesn't cap the number of nuggets. Open questions: a setting with a default of 21 or no cap at all, and whether to set a maximum.
 
 ## v2 ideas
 - [ ] **Search Nuggets:** browse and add nuggets shared by the community. This needs a backend, so it's out of scope for the local-only v1.

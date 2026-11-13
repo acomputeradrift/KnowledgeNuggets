@@ -31,6 +31,15 @@ enum SampleData {
         NuggetDraft(text: "Slow is smooth, and smooth is fast.", author: "U.S. Navy SEALs", kind: .quote),
     ]
 
+    /// Exactly `activeCount` active nuggets, reusing the samples with a number added.
+    static func seed(into store: NuggetStore, activeCount: Int) {
+        for index in 0..<max(0, activeCount) {
+            var draft = drafts[index % drafts.count]
+            if index >= drafts.count { draft.text += " (\(index + 1))" }
+            _ = try? store.add(draft, active: true)
+        }
+    }
+
     static func seed(into store: NuggetStore) {
         for draft in drafts {
             _ = try? store.add(draft, active: true)

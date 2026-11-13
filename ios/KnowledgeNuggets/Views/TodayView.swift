@@ -31,9 +31,13 @@ struct TodayView: View {
     private var content: some View {
         if model.isEmpty {
             ContentUnavailableView {
-                Label("No Nuggets Yet", systemImage: "text.quote")
+                VStack(spacing: 16) {
+                    WeekDots(filled: model.active.count)
+                    Text("Fill Your First Week")
+                        .font(.title2.bold())
+                }
             } description: {
-                Text("Save a passage from your reading and it will come back to you, one a day.")
+                Text("Add seven nuggets and a different one comes back to you each day.")
             } actions: {
                 Button("Add a Nugget") { isAdding = true }
                     .primaryActionStyle()
@@ -117,6 +121,27 @@ struct NuggetCard: View {
             .accessibilityValue(nugget.attribution ?? "")
             .accessibilityHint("Opens the nugget.")
         }
+    }
+}
+
+/// Seven dots, one per day of the first week, filled for each active nugget.
+struct WeekDots: View {
+    let filled: Int
+
+    @ScaledMetric(relativeTo: .title2) private var size: CGFloat = 12
+
+    var body: some View {
+        HStack(spacing: size * 0.75) {
+            ForEach(0..<7, id: \.self) { day in
+                Circle()
+                    .fill(day < filled ? Color("AccentColor") : Color.clear)
+                    .strokeBorder(Color("AccentColor"), lineWidth: 1.5)
+                    .frame(width: min(size, 28), height: min(size, 28))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("First week")
+        .accessibilityValue("\(min(filled, 7)) of 7 days filled")
     }
 }
 

@@ -8,7 +8,11 @@ struct NuggetEditorView: View {
     @AppStorage("lastNuggetKind") private var lastKind = NuggetKind.default.rawValue
     @State private var draft: NuggetDraft
     @State private var showsCategory: Bool
-    @State private var limitMessage: String?
+    /// What a new nugget's editor started from: empty, or the kind and source
+    /// carried over by Add Another. Changes from it need confirming to discard.
+    @State private var baseline: NuggetDraft
+    /// Set after a new nugget is saved; shown in place of the form.
+    @State private var celebration: SaveCelebration?
     @FocusState private var focus: Field?
 
     private enum Field: Hashable {
@@ -19,14 +23,31 @@ struct NuggetEditorView: View {
         self.nugget = nugget
         let draft = nugget.map(NuggetDraft.init) ?? NuggetDraft()
         _draft = State(initialValue: draft)
+        _baseline = State(initialValue: draft)
         _showsCategory = State(initialValue: !draft.category.isEmpty)
     }
 
     private var original: NuggetDraft {
-        nugget.map(NuggetDraft.init) ?? NuggetDraft(kind: draft.kind)
+        if let nugget { return NuggetDraft(nugget) }
+        var original = baseline
+        original.kind = draft.kind
+        return original
     }
 
     var body: some View {
+        ZStack {
+            if let celebration {
+                SaveCelebrationView(celebration: celebration, onAddAnother: addAnother, onDone: { dismiss() })
+                    .transition(.opacity)
+            } else {
+                editor
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: celebration)
+    }
+
+    private var editor: some View {
         NavigationStack {
             Form {
                 Section {
@@ -68,15 +89,6 @@ struct NuggetEditorView: View {
                     focus = .content
                 }
             }
-            .alert(
-                "Saved as Inactive",
-                isPresented: Binding(
-                    get: { limitMessage != nil },
-                    set: { if !$0 { limitMessage = nil } }
-                ),
-                actions: { Button("OK") { dismiss() } },
-                message: { Text(limitMessage ?? "") }
-            )
         }
     }
 
@@ -145,10 +157,27 @@ struct NuggetEditorView: View {
     private func save() {
         guard draft.canSave else { return }
         if nugget == nil { lastKind = draft.kind.rawValue }
-        if let message = model.save(draft, editing: nugget) {
-            limitMessage = message
-        } else {
+        // Edits, and saves that fail, close as before. New nuggets celebrate.
+        guard let result = model.save(draft, editing: nugget), nugget == nil else {
             dismiss()
+            return
+        }
+        focus = nil
+        celebration = result
+    }
+
+    /// Back to a fresh form that keeps the kind and source, so several nuggets
+    /// from one book are quick to add.
+    private func addAnother() {
+        let next = NuggetDraft(author: draft.author, book: draft.book, kind: draft.kind)
+        draft = next
+        baseline = next
+        showsCategory = false
+        celebration = nil
+        // Focus once the form has faded back in; focus set mid-transition is dropped.
+        Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            focus = .content
         }
     }
 }

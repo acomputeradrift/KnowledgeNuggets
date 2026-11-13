@@ -22,6 +22,8 @@ struct KnowledgeNuggetsApp: App {
         let store = SwiftDataNuggetStore(context: container.mainContext)
         if launch.seedSampleData {
             SampleData.seed(into: store)
+        } else if let count = launch.seedActiveCount {
+            SampleData.seed(into: store, activeCount: count)
         }
         _model = State(initialValue: AppModel(
             store: store,
@@ -64,6 +66,9 @@ enum BackgroundRefresh {
 struct LaunchOptions {
     var inMemoryStore = false
     var seedSampleData = false
+    /// `-seedActiveCount N`: N active nuggets and nothing else, for checking the
+    /// add-nugget celebration at each milestone.
+    var seedActiveCount: Int?
     var initialTab: AppTab = .today
 
     static var current: LaunchOptions {
@@ -72,6 +77,9 @@ struct LaunchOptions {
         var options = LaunchOptions()
         options.inMemoryStore = arguments.contains("-inMemoryStore")
         options.seedSampleData = arguments.contains("-seedSampleData")
+        if let index = arguments.firstIndex(of: "-seedActiveCount"), arguments.indices.contains(index + 1) {
+            options.seedActiveCount = Int(arguments[index + 1])
+        }
         if let index = arguments.firstIndex(of: "-tab"), arguments.indices.contains(index + 1),
            let tab = AppTab(rawValue: arguments[index + 1]) {
             options.initialTab = tab

@@ -90,14 +90,30 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.upNextNugget?.text, "A")
     }
 
-    func testSavingPastTheLimitReturnsAMessage() {
+    func testSavingPastTheLimitKeepsTheNuggetInactive() {
         let model = makeModel()
         for index in 0..<21 {
-            XCTAssertNil(model.save(NuggetDraft(text: "N\(index)", kind: .affirmation)))
+            let result = model.save(NuggetDraft(text: "N\(index)", kind: .affirmation))
+            XCTAssertEqual(result, SaveCelebration(activeCount: index + 1, keptInactive: false))
         }
-        XCTAssertNotNil(model.save(NuggetDraft(text: "Too many", kind: .affirmation)))
+        let result = model.save(NuggetDraft(text: "Too many", kind: .affirmation))
+        XCTAssertEqual(result, SaveCelebration(activeCount: 21, keptInactive: true))
         XCTAssertEqual(model.active.count, 21)
         XCTAssertEqual(model.inactive.map(\.text), ["Too many"])
+    }
+
+    func testEditingReturnsNoCelebration() {
+        let model = makeModel()
+        XCTAssertNotNil(model.save(NuggetDraft(text: "One", kind: .affirmation)))
+        let nugget = model.active[0]
+        XCTAssertNil(model.save(NuggetDraft(text: "Changed", kind: .affirmation), editing: nugget))
+        XCTAssertEqual(model.active.map(\.text), ["Changed"])
+    }
+
+    func testInvalidDraftReturnsNoCelebration() {
+        let model = makeModel()
+        XCTAssertNil(model.save(NuggetDraft(text: "No source", kind: .book)))
+        XCTAssertTrue(model.isEmpty)
     }
 
     func testMissingAuthorIsFilledAfterSave() async {
