@@ -100,8 +100,11 @@ final class AppModel {
     }
 
     /// Adds or updates a nugget. For a new nugget, returns what to celebrate:
-    /// the active count after the save and whether the rotation was full, so it
-    /// was saved inactive. Returns nil after an edit or when nothing was saved.
+    /// the active count after the save and where it went (the rotation, or
+    /// Inactive because the rotation was full or the switch was off). An edit
+    /// that flips the Active switch goes through `setActive`, with the
+    /// same rules as the list's swipe action. Returns nil after an edit or when
+    /// nothing was saved.
     /// Does nothing unless the draft has content and, except for affirmations,
     /// a By or From.
     @discardableResult
@@ -112,9 +115,13 @@ final class AppModel {
             let saved: Nugget
             if let nugget {
                 try store.update(nugget, with: draft)
+                if draft.isActive != nugget.isActive {
+                    // Refused (rotation full) leaves it inactive; the editor disables the switch then.
+                    try store.setActive(nugget, draft.isActive)
+                }
                 saved = nugget
             } else {
-                let (added, result) = try store.add(draft, active: true)
+                let (added, result) = try store.add(draft, active: draft.isActive)
                 saved = added
                 outcome = result
             }

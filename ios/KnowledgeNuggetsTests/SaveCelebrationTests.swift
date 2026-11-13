@@ -53,8 +53,27 @@ final class SaveCelebrationTests: XCTestCase {
         )
     }
 
+    func testSwitchedOffSaysInactiveWithoutMentioningAFullRotation() {
+        let off = SaveCelebration(activeCount: 7, limit: 21, outcome: .inactive)
+        XCTAssertEqual(off.note, "Added as Inactive.")
+        XCTAssertTrue(off.keptInactive)
+        XCTAssertNil(off.milestone, "Only a save that added to the rotation is a milestone")
+        XCTAssertEqual(off.headline, "Nugget saved!")
+        XCTAssertFalse(off.isBigCelebration)
+        XCTAssertEqual(off.previousActiveCount, 7, "Nothing moved, so the ring doesn't grow")
+        XCTAssertTrue(off.offersAddAnother)
+        XCTAssertFalse(off.closesAutomatically)
+        XCTAssertEqual(off.announcement, "Nugget saved! Added as Inactive.")
+        XCTAssertNotEqual(off, SaveCelebration(activeCount: 7, limit: 21, outcome: .keptInactiveLimitReached))
+    }
+
     func testNoteNeverMentionsNew() {
-        for celebration in [added(3), SaveCelebration(activeCount: 21, limit: 21, keptInactive: true)] {
+        let all = [
+            added(3),
+            SaveCelebration(activeCount: 21, limit: 21, keptInactive: true),
+            SaveCelebration(activeCount: 3, limit: 21, outcome: .inactive),
+        ]
+        for celebration in all {
             XCTAssertFalse(celebration.note.localizedCaseInsensitiveContains("new"))
         }
     }
@@ -62,6 +81,11 @@ final class SaveCelebrationTests: XCTestCase {
     func testOutcomeInitializer() {
         XCTAssertFalse(SaveCelebration(activeCount: 3, limit: 21, outcome: .active).keptInactive)
         XCTAssertTrue(SaveCelebration(activeCount: 21, limit: 21, outcome: .keptInactiveLimitReached).keptInactive)
+        XCTAssertTrue(SaveCelebration(activeCount: 3, limit: 21, outcome: .inactive).keptInactive)
+        XCTAssertEqual(
+            SaveCelebration(activeCount: 21, limit: 21, keptInactive: true),
+            SaveCelebration(activeCount: 21, limit: 21, outcome: .keptInactiveLimitReached)
+        )
     }
 
     // MARK: Closing

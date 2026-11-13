@@ -16,6 +16,8 @@ struct NuggetBackup: Codable, Equatable, Sendable {
         var sortOrder: Int
         var createdAt: Date
         var updatedAt: Date
+        /// When it was moved out of the rotation on purpose. Missing in older backups.
+        var deactivatedAt: Date?
     }
 
     var version: Int = 1
@@ -66,7 +68,8 @@ extension NuggetBackup.Item {
             isActive: nugget.isActive,
             sortOrder: nugget.sortOrder,
             createdAt: nugget.createdAt,
-            updatedAt: nugget.updatedAt
+            updatedAt: nugget.updatedAt,
+            deactivatedAt: nugget.deactivatedAt
         )
     }
 }

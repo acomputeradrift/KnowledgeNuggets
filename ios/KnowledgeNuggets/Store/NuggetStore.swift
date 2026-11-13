@@ -4,6 +4,11 @@ import Foundation
 enum NuggetRules {
     /// The most nuggets that can be in the daily rotation at once.
     static let activeLimit = 21
+
+    /// Under the editor's Active switch when it's disabled because the limit is reached.
+    static var activeLimitReachedNote: String {
+        "\(activeLimit) nuggets are already active. Make one inactive first."
+    }
 }
 
 /// What happened when a nugget was added or activated.
@@ -48,16 +53,20 @@ struct ImportSummary: Equatable, Sendable {
 protocol NuggetStore: AnyObject {
     /// Active nuggets in rotation order.
     func activeNuggets() throws -> [Nugget]
-    /// Inactive nuggets, most recently changed first.
+    /// Inactive nuggets: those waiting for a spot, oldest first, then those moved
+    /// out on purpose, most recently moved out last. Editing never changes it.
     func inactiveNuggets() throws -> [Nugget]
     func nugget(id: UUID) throws -> Nugget?
 
     /// Adds a nugget. It goes to the end of the rotation unless the rotation is full.
+    /// `active: false` saves it inactive on purpose, so it counts as moved out.
     @discardableResult
     func add(_ draft: NuggetDraft, active: Bool) throws -> (Nugget, ActivationOutcome)
     func update(_ nugget: Nugget, with draft: NuggetDraft) throws
     /// Fills in a looked-up author or book, only where the field is still blank.
     func fillMetadata(id: UUID, author: String?, book: String?) throws -> Bool
+    /// Moving out stamps `deactivatedAt`; moving in clears it and appends to the
+    /// rotation, unless the rotation is full. Nothing is ever promoted automatically.
     @discardableResult
     func setActive(_ nugget: Nugget, _ active: Bool) throws -> ActivationOutcome
     func delete(_ nugget: Nugget) throws

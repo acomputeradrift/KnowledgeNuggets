@@ -42,7 +42,7 @@ struct NuggetDetailView: View {
                                         .background(.tint.opacity(0.15), in: Capsule())
                                         .accessibilityLabel("Category: \(category)")
                                 }
-                                Text(nugget.isActive ? "· In rotation" : "· Inactive")
+                                Text(nugget.isActive ? "· Active" : "· Inactive")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }

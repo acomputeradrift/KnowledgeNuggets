@@ -67,6 +67,7 @@ struct NuggetEditorView: View {
                     sourceSection
                 }
 
+                activeSection
                 categorySection
             }
             .listSectionSpacing(.compact)
@@ -132,6 +133,31 @@ struct NuggetEditorView: View {
         }
     }
 
+    /// Whether this nugget can be active: fewer than the limit are, or it already is.
+    private var canBeActive: Bool {
+        nugget?.isActive == true || model.active.count < NuggetRules.activeLimit
+    }
+
+    private var activeSection: some View {
+        Section {
+            // Shown off while the limit is reached, but the wish is kept: a new nugget
+            // saved then still counts as kept inactive because the limit was reached.
+            Toggle(isOn: Binding(
+                get: { draft.isActive && canBeActive },
+                set: { draft.isActive = $0 }
+            )) {
+                // A disabled Toggle in a Form keeps its label in the primary color.
+                Text("Active")
+                    .foregroundStyle(canBeActive ? .primary : .secondary)
+            }
+            .disabled(!canBeActive)
+        } footer: {
+            if !canBeActive {
+                Text(NuggetRules.activeLimitReachedNote)
+            }
+        }
+    }
+
     @ViewBuilder
     private var categorySection: some View {
         if showsCategory {
@@ -169,7 +195,8 @@ struct NuggetEditorView: View {
     /// Back to a fresh form that keeps the kind and source, so several nuggets
     /// from one book are quick to add.
     private func addAnother() {
-        let next = NuggetDraft(author: draft.author, book: draft.book, kind: draft.kind)
+        // Keeps the Active switch too; it shows off by itself if the rotation filled up.
+        let next = NuggetDraft(author: draft.author, book: draft.book, kind: draft.kind, isActive: draft.isActive)
         draft = next
         baseline = next
         showsCategory = false

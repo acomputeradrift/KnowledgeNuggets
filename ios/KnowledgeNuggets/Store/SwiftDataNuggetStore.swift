@@ -40,12 +40,24 @@ final class SwiftDataNuggetStore: NuggetStore {
         return try context.fetch(descriptor)
     }
 
+    /// Inactive nuggets in a stable order that editing never changes: first the
+    /// ones waiting for a spot (never moved out on purpose), oldest first, then
+    /// the ones moved out on purpose, so the most recently moved out is last.
+    /// Sorted here because a SortDescriptor can't put nil dates first.
     func inactiveNuggets() throws -> [Nugget] {
-        let descriptor = FetchDescriptor<Nugget>(
-            predicate: #Predicate { !$0.isActive },
-            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
-        )
-        return try context.fetch(descriptor)
+        let descriptor = FetchDescriptor<Nugget>(predicate: #Predicate { !$0.isActive })
+        return try context.fetch(descriptor).sorted(by: Self.inactiveOrder)
+    }
+
+    static func inactiveOrder(_ lhs: Nugget, _ rhs: Nugget) -> Bool {
+        switch (lhs.deactivatedAt, rhs.deactivatedAt) {
+        case (nil, .some): return true
+        case (.some, nil): return false
+        case let (.some(left), .some(right)) where left != right: return left < right
+        default:
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
     }
 
     func nugget(id: UUID) throws -> Nugget? {
@@ -78,7 +90,10 @@ final class SwiftDataNuggetStore: NuggetStore {
             isActive: makeActive,
             sortOrder: makeActive ? try nextSortOrder() : 0,
             createdAt: timestamp,
-            updatedAt: timestamp
+            updatedAt: timestamp,
+            // Only a deliberate "not in rotation" counts as moved out. One kept
+            // inactive because the rotation is full waits for a spot instead.
+            deactivatedAt: active ? nil : timestamp
         )
         context.insert(nugget)
         try context.save()
@@ -123,8 +138,10 @@ final class SwiftDataNuggetStore: NuggetStore {
             }
             nugget.sortOrder = try nextSortOrder()
         }
+        let timestamp = now()
         nugget.isActive = active
-        nugget.updatedAt = now()
+        nugget.deactivatedAt = active ? nil : timestamp
+        nugget.updatedAt = timestamp
         try context.save()
         return active ? .active : .inactive
     }
@@ -179,15 +196,23 @@ final class SwiftDataNuggetStore: NuggetStore {
                 if item.isActive && !existing.isActive {
                     if activeTotal < NuggetRules.activeLimit {
                         existing.isActive = true
+                        existing.deactivatedAt = nil
                         existing.sortOrder = nextOrder
                         nextOrder += 1
                         activeTotal += 1
                     } else {
+                        // Active in the backup, so it waits for a spot rather than counting as moved out.
+                        existing.deactivatedAt = nil
                         summary.keptInactive += 1
                     }
                 } else if !item.isActive && existing.isActive {
                     existing.isActive = false
+                    existing.deactivatedAt = item.deactivatedAt
                     activeTotal -= 1
+                } else if !item.isActive {
+                    // Inactive on both sides. Backups made before the field existed don't
+                    // know when it moved out, so keep what this device knows.
+                    existing.deactivatedAt = item.deactivatedAt ?? existing.deactivatedAt
                 }
                 summary.updated += 1
             } else {
@@ -206,7 +231,9 @@ final class SwiftDataNuggetStore: NuggetStore {
                     isActive: makeActive,
                     sortOrder: makeActive ? nextOrder : 0,
                     createdAt: item.createdAt,
-                    updatedAt: item.updatedAt
+                    updatedAt: item.updatedAt,
+                    // Nil when it's waiting for a spot: kept out by the limit, or from an older backup.
+                    deactivatedAt: item.isActive ? nil : item.deactivatedAt
                 )
                 if makeActive {
                     nextOrder += 1

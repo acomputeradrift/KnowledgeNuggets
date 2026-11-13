@@ -102,6 +102,75 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.inactive.map(\.text), ["Too many"])
     }
 
+    // MARK: Active switch
+
+    func testAddingWithTheSwitchOffSavesInactiveAtTheBottom() {
+        let model = makeModel()
+        model.save(NuggetDraft(text: "A", kind: .affirmation))
+        model.save(NuggetDraft(text: "B", kind: .affirmation))
+        model.setActive(model.active[0], false)
+
+        let result = model.save(NuggetDraft(text: "Off", kind: .affirmation, isActive: false))
+        XCTAssertEqual(result, SaveCelebration(activeCount: 1, outcome: .inactive))
+        XCTAssertEqual(result?.note, "Added as Inactive.")
+        XCTAssertNil(result?.milestone)
+        XCTAssertEqual(model.active.map(\.text), ["B"])
+        XCTAssertEqual(model.inactive.map(\.text), ["A", "Off"])
+        XCTAssertNotNil(model.inactive.last?.deactivatedAt)
+    }
+
+    func testSwitchOnWhenFullKeepsItWaitingAtTheTopOfInactive() {
+        let model = makeModel()
+        for index in 0..<21 { model.save(NuggetDraft(text: "N\(index)", kind: .affirmation)) }
+        model.save(NuggetDraft(text: "Off", kind: .affirmation, isActive: false))
+        let result = model.save(NuggetDraft(text: "Waiting", kind: .affirmation))
+        XCTAssertEqual(result?.note, "Added as Inactive. Your rotation is full.")
+        XCTAssertEqual(model.inactive.map(\.text), ["Waiting", "Off"])
+        XCTAssertNil(model.inactive[0].deactivatedAt)
+    }
+
+    func testEditingCanSwitchOutAndBackInButNeverMakeA22nd() throws {
+        let model = makeModel()
+        for index in 0..<21 { model.save(NuggetDraft(text: "N\(index)", kind: .affirmation)) }
+        model.save(NuggetDraft(text: "Waiting", kind: .affirmation))
+        let waiting = try XCTUnwrap(model.inactive.first)
+
+        // Switching on while full is refused, but the text edit still saves.
+        var draft = NuggetDraft(waiting)
+        draft.text = "Waiting edited"
+        draft.isActive = true
+        XCTAssertNil(model.save(draft, editing: waiting))
+        XCTAssertEqual(model.active.count, 21)
+        XCTAssertFalse(waiting.isActive)
+        XCTAssertEqual(waiting.text, "Waiting edited")
+
+        // An active nugget can always be switched off; that moves it out.
+        let first = model.active[0]
+        var off = NuggetDraft(first)
+        off.isActive = false
+        model.save(off, editing: first)
+        XCTAssertFalse(first.isActive)
+        XCTAssertNotNil(first.deactivatedAt)
+        XCTAssertEqual(model.active.count, 20)
+        XCTAssertEqual(model.inactive.map(\.text), ["Waiting edited", "N0"], "Nothing is promoted")
+
+        // Now there's room, so switching it on appends it to the rotation.
+        draft = NuggetDraft(waiting)
+        draft.isActive = true
+        model.save(draft, editing: waiting)
+        XCTAssertTrue(waiting.isActive)
+        XCTAssertNil(waiting.deactivatedAt)
+        XCTAssertEqual(model.active.last?.text, "Waiting edited")
+        XCTAssertEqual(model.active.count, 21)
+    }
+
+    func testEditingTextKeepsTheInactiveOrder() {
+        let model = makeModel()
+        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name, kind: .affirmation, isActive: false)) }
+        model.save(NuggetDraft(text: "B edited", kind: .affirmation, isActive: false), editing: model.inactive[1])
+        XCTAssertEqual(model.inactive.map(\.text), ["A", "B edited", "C"])
+    }
+
     func testEditingReturnsNoCelebration() {
         let model = makeModel()
         XCTAssertNotNil(model.save(NuggetDraft(text: "One", kind: .affirmation)))

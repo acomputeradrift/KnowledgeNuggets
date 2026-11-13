@@ -19,6 +19,11 @@ final class Nugget {
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    /// When the owner deliberately took this nugget out of the rotation. Nil
+    /// while active, and for nuggets left inactive only because the rotation
+    /// was full. Orders the Inactive list; optional so CloudKit and
+    /// lightweight migration accept it.
+    var deactivatedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -30,7 +35,8 @@ final class Nugget {
         isActive: Bool = true,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        deactivatedAt: Date? = nil
     ) {
         self.id = id
         self.text = text
@@ -42,6 +48,7 @@ final class Nugget {
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.deactivatedAt = deactivatedAt
     }
 
     /// A value copy that is safe to pass to the rotation and notification code.
@@ -93,13 +100,24 @@ struct NuggetDraft: Equatable, Sendable {
     var book: String = ""
     var category: String = ""
     var kind: NuggetKind = .default
+    /// The editor's Active switch. For a new nugget this is the wish; the store
+    /// still keeps it inactive when the rotation is full.
+    var isActive: Bool = true
 
-    init(text: String = "", author: String = "", book: String = "", category: String = "", kind: NuggetKind = .default) {
+    init(
+        text: String = "",
+        author: String = "",
+        book: String = "",
+        category: String = "",
+        kind: NuggetKind = .default,
+        isActive: Bool = true
+    ) {
         self.text = text
         self.author = author
         self.book = book
         self.category = category
         self.kind = kind
+        self.isActive = isActive
     }
 
     init(_ nugget: Nugget) {
@@ -108,7 +126,8 @@ struct NuggetDraft: Equatable, Sendable {
             author: nugget.author ?? "",
             book: nugget.book ?? "",
             category: nugget.category ?? "",
-            kind: nugget.nuggetKind
+            kind: nugget.nuggetKind,
+            isActive: nugget.isActive
         )
     }
 

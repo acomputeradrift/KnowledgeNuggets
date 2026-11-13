@@ -263,6 +263,10 @@ struct ConfettiPiece {
     SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, keptInactive: false), onAddAnother: {}, onDone: {})
 }
 
+#Preview("Switched off") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, outcome: .inactive), onAddAnother: {}, onDone: {})
+}
+
 #Preview("Kept inactive") {
     SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, keptInactive: true), onAddAnother: {}, onDone: {})
 }

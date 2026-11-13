@@ -8,18 +8,23 @@ struct SaveCelebration: Equatable, Sendable {
     let activeCount: Int
     /// The most nuggets the rotation holds.
     let limit: Int
-    /// The rotation was full, so the nugget was saved as inactive.
-    let keptInactive: Bool
-
-    init(activeCount: Int, limit: Int = NuggetRules.activeLimit, keptInactive: Bool) {
-        self.activeCount = max(0, activeCount)
-        self.limit = max(1, limit)
-        self.keptInactive = keptInactive
-    }
+    /// Where the nugget went: into the rotation, inactive because the rotation
+    /// was full, or inactive because the switch was turned off.
+    let outcome: ActivationOutcome
 
     init(activeCount: Int, limit: Int = NuggetRules.activeLimit, outcome: ActivationOutcome) {
-        self.init(activeCount: activeCount, limit: limit, keptInactive: outcome != .active)
+        self.activeCount = max(0, activeCount)
+        self.limit = max(1, limit)
+        self.outcome = outcome
     }
+
+    /// `keptInactive: true` means the rotation was full.
+    init(activeCount: Int, limit: Int = NuggetRules.activeLimit, keptInactive: Bool) {
+        self.init(activeCount: activeCount, limit: limit, outcome: keptInactive ? .keptInactiveLimitReached : .active)
+    }
+
+    /// The nugget was saved as inactive, for either reason.
+    var keptInactive: Bool { outcome != .active }
 
     /// A count worth marking. Only reached when this save added to the rotation.
     enum Milestone: Equatable, Sendable {
@@ -83,9 +88,11 @@ struct SaveCelebration: Equatable, Sendable {
 
     /// The small note at the bottom, the only part that differs between Active and Inactive.
     var note: String {
-        keptInactive
-            ? "Added as Inactive. Your rotation is full."
-            : "Added to the end of your rotation."
+        switch outcome {
+        case .active: return "Added to the end of your rotation."
+        case .keptInactiveLimitReached: return "Added as Inactive. Your rotation is full."
+        case .inactive: return "Added as Inactive."
+        }
     }
 
     /// Confetti and a stronger haptic.
