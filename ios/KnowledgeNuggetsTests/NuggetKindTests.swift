@@ -91,6 +91,34 @@ final class NuggetKindTests: XCTestCase {
         XCTAssertEqual(try store.nugget(id: backup.nuggets[0].id)?.nuggetKind, .book)
     }
 
+    func testLyricsKindMetadataAndRequirements() {
+        XCTAssertEqual(NuggetKind(storedValue: "lyrics"), .lyrics)
+        XCTAssertEqual(NuggetKind.lyrics.rawValue, "lyrics")
+        XCTAssertEqual(NuggetKind.lyrics.title, "Lyrics")
+        XCTAssertEqual(NuggetKind.lyrics.byPrompt, "Artist")
+        XCTAssertEqual(NuggetKind.lyrics.fromPrompt, "Song")
+        XCTAssertTrue(NuggetKind.lyrics.hasSource)
+        XCTAssertFalse(NuggetKind.lyrics.supportsLookup)
+        XCTAssertEqual(NuggetKind.allCases.firstIndex(of: .lyrics), NuggetKind.allCases.firstIndex(of: .podcast)! + 1)
+
+        XCTAssertFalse(NuggetDraft(text: "Placeholder chorus line", kind: .lyrics).canSave)
+        XCTAssertTrue(NuggetDraft(text: "Placeholder chorus line", author: "Made-up Artist", kind: .lyrics).canSave)
+        XCTAssertTrue(NuggetDraft(text: "Placeholder chorus line", book: "Made-up Song", kind: .lyrics).canSave)
+    }
+
+    func testLyricsDoesNotTriggerLookupAndRoundTripsThroughBackup() async throws {
+        let model = makeModel(lookup: FakeLookup(authors: ["Made-up Song": "Someone"]))
+        model.save(NuggetDraft(text: "Placeholder chorus line", book: "Made-up Song", kind: .lyrics))
+        XCTAssertNil(model.lookupTask)
+        XCTAssertNil(model.active.first?.author)
+
+        let (nugget, _) = try store.add(NuggetDraft(text: "Placeholder verse line", author: "Made-up Artist", book: "Made-up Song", kind: .lyrics), active: true)
+        let decoded = try NuggetBackup.decode(try store.exportBackup().encoded())
+        XCTAssertEqual(decoded.nuggets.first { $0.id == nugget.id }?.kind, "lyrics")
+        _ = try store.importBackup(decoded)
+        XCTAssertEqual(try store.nugget(id: nugget.id)?.nuggetKind, .lyrics)
+    }
+
     // MARK: Lookup and recents
 
     func testLookupOnlyRunsForBooks() async {

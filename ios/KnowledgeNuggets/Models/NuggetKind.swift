@@ -3,7 +3,7 @@ import Foundation
 /// Where a nugget came from. Stored as its raw value so new kinds can be added
 /// without a migration; an unknown value reads as `.other`.
 enum NuggetKind: String, CaseIterable, Codable, Identifiable, Sendable {
-    case book, movie, show, podcast, quote, affirmation, other
+    case book, movie, show, podcast, lyrics, quote, affirmation, other
 
     static let `default`: NuggetKind = .book
 
@@ -15,6 +15,7 @@ enum NuggetKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .movie: return "Movie"
         case .show: return "Show"
         case .podcast: return "Podcast"
+        case .lyrics: return "Lyrics"
         case .quote: return "Quote"
         case .affirmation: return "Affirmation"
         case .other: return "Other"
@@ -27,6 +28,7 @@ enum NuggetKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .movie: return "film"
         case .show: return "tv"
         case .podcast: return "mic"
+        case .lyrics: return "music.note"
         case .quote: return "quote.bubble"
         case .affirmation: return "heart"
         case .other: return "sparkles"
@@ -42,6 +44,7 @@ enum NuggetKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .book: return "Author"
         case .movie, .show: return "Character, actor or director"
         case .podcast: return "Host or guest"
+        case .lyrics: return "Artist"
         case .quote: return "Who said it"
         case .affirmation, .other: return "Person"
         }
@@ -54,6 +57,7 @@ enum NuggetKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .movie: return "Movie title"
         case .show: return "Show or episode"
         case .podcast: return "Podcast or episode"
+        case .lyrics: return "Song"
         case .quote: return "Speech, article or occasion"
         case .affirmation, .other: return "Source"
         }
