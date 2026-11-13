@@ -107,6 +107,20 @@ final class SaveCelebrationTests: XCTestCase {
         }
     }
 
+    func testAutoCloseLeavesTimeToRead() {
+        XCTAssertEqual(SaveCelebration.autoCloseDelay, .seconds(4))
+        XCTAssertGreaterThanOrEqual(SaveCelebration.autoCloseDelay, .seconds(3), "Too quick to read the headline, ring and note")
+    }
+
+    // MARK: Sound
+
+    func testCelebrationSoundShipsInTheAppBundle() {
+        // Only checks the files are there; nothing is played under tests.
+        let bundle = Bundle(for: SoundPlayer.self)
+        XCTAssertNotNil(SoundPlayer.url(for: SoundPlayer.saveCelebration, in: bundle), SoundPlayer.saveCelebration)
+        XCTAssertNil(SoundPlayer.url(for: "no-such-sound.caf", in: bundle))
+    }
+
     // MARK: Progress
 
     func testProgress() {

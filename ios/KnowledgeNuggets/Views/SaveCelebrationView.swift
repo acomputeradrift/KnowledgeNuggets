@@ -19,6 +19,9 @@ struct SaveCelebrationView: View {
         self.onAddAnother = onAddAnother
         self.onDone = onDone
         _ringProgress = State(initialValue: celebration.previousProgress)
+        // Warm up the audio session and chime while the sheet is presented, so
+        // the sound starts in step with the haptic. `play` loads it too if needed.
+        Task { @MainActor in SoundPlayer.shared.preload(SoundPlayer.saveCelebration) }
     }
 
     private var closesAutomatically: Bool {
@@ -63,7 +66,7 @@ struct SaveCelebrationView: View {
         .task {
             guard closesAutomatically else { return }
             // Cancelled when the sheet goes away first, so it never closes twice.
-            guard (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
+            guard (try? await Task.sleep(for: SaveCelebration.autoCloseDelay)) != nil else { return }
             onDone()
         }
     }
@@ -124,6 +127,8 @@ struct SaveCelebrationView: View {
     private func start() {
         let animation: Animation = reduceMotion ? .easeIn(duration: 0.3) : .spring(response: 0.45, dampingFraction: 0.55)
         withAnimation(animation) { appeared = true }
+        // `appeared` triggers the success haptic, so the chime plays with it.
+        SoundPlayer.shared.play(SoundPlayer.saveCelebration)
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.8).delay(0.2)) {
             ringProgress = celebration.progress
         }

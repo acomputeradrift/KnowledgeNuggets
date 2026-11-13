@@ -102,6 +102,10 @@ struct SaveCelebration: Equatable, Sendable {
     /// nothing left to fill. The view also checks VoiceOver.
     var closesAutomatically: Bool { isFull }
 
+    /// How long the sheet stays up before closing on its own: long enough to
+    /// read the headline, ring and note. A tap or Done closes it sooner.
+    static let autoCloseDelay: Duration = .seconds(4)
+
     /// Add Another is offered while there are spots left.
     var offersAddAnother: Bool { !isFull }
 
