@@ -3,7 +3,6 @@ import UserNotifications
 
 /// One planned daily notification.
 struct PlannedNotification: Equatable, Sendable {
-    static let titleText = "Knowledge Nugget"
     static let nuggetIDKey = "nuggetID"
 
     var identifier: String
@@ -13,9 +12,15 @@ struct PlannedNotification: Equatable, Sendable {
     /// Year, month, day, hour and minute with no time zone, so it fires at
     /// the same local time when the phone changes time zone.
     var dateComponents: DateComponents
-    var title: String
-    var subtitle: String
+    /// The quote, with who it's by and where it's from at the end. There's no
+    /// title or subtitle: iOS already shows the app name, and every line they
+    /// took was one less line of the quote before it's cut off.
     var body: String
+
+    static func body(text: String, attribution: String?) -> String {
+        guard let attribution, !attribution.isEmpty else { return text }
+        return "\(text) — \(attribution)"
+    }
 }
 
 /// The parts of `UNUserNotificationCenter` the scheduler uses, so tests can fake it.
@@ -116,9 +121,7 @@ final class NotificationScheduler: @unchecked Sendable {
                     nuggetID: nugget.id,
                     fireDate: fireDate,
                     dateComponents: components,
-                    title: PlannedNotification.titleText,
-                    subtitle: nugget.attribution ?? "",
-                    body: nugget.text
+                    body: PlannedNotification.body(text: nugget.text, attribution: nugget.attribution)
                 )
             )
         }
@@ -131,8 +134,6 @@ final class NotificationScheduler: @unchecked Sendable {
 
     static func request(for planned: PlannedNotification) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
-        content.title = planned.title
-        content.subtitle = planned.subtitle
         content.body = planned.body
         content.sound = .default
         content.userInfo = [PlannedNotification.nuggetIDKey: planned.nuggetID.uuidString]

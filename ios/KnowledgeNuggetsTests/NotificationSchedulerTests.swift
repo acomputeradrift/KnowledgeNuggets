@@ -56,9 +56,7 @@ final class NotificationSchedulerTests: XCTestCase {
         // Jan 2 is day 1 of the rotation.
         XCTAssertEqual(planned.prefix(4).map(\.nuggetID), [active[1].id, active[2].id, active[0].id, active[1].id])
         let first = planned[0]
-        XCTAssertEqual(first.title, "Knowledge Nugget")
-        XCTAssertEqual(first.body, "Nugget 1")
-        XCTAssertEqual(first.subtitle, "Author 1 · Book 1")
+        XCTAssertEqual(first.body, "Nugget 1 — Author 1 · Book 1")
     }
 
     func testSubtitleUsesWhateverIsKnown() {
@@ -68,7 +66,7 @@ final class NotificationSchedulerTests: XCTestCase {
             NuggetSnapshot(text: "c"),
         ]
         let planned = plan(active, now: date(2026, 1, 1, 6, in: calendar))
-        XCTAssertEqual(planned.prefix(3).map(\.subtitle), ["Only Author", "Only Book", ""])
+        XCTAssertEqual(planned.prefix(3).map(\.body), ["a — Only Author", "b — Only Book", "c"])
     }
 
     func testCustomTime() {
@@ -177,9 +175,9 @@ final class NotificationSchedulerTests: XCTestCase {
         XCTAssertEqual(center.removeAllCount, 1)
 
         let request = center.pending[0]
-        XCTAssertEqual(request.content.title, "Knowledge Nugget")
-        XCTAssertEqual(request.content.body, "Nugget 0")
-        XCTAssertEqual(request.content.subtitle, "Author 0 · Book 0")
+        XCTAssertEqual(request.content.title, "", "No title, so the quote gets the space")
+        XCTAssertEqual(request.content.subtitle, "")
+        XCTAssertEqual(request.content.body, "Nugget 0 — Author 0 · Book 0")
         XCTAssertEqual(NotificationScheduler.nuggetID(from: request.content.userInfo), active[0].id)
         let trigger = request.trigger as? UNCalendarNotificationTrigger
         XCTAssertEqual(trigger?.dateComponents.day, 1)
@@ -190,7 +188,7 @@ final class NotificationSchedulerTests: XCTestCase {
         await scheduler.reschedule(active: Array(active.prefix(1)), settings: settings, rotationStart: now)
         XCTAssertEqual(center.pending.count, 60)
         XCTAssertEqual(center.removeAllCount, 2)
-        XCTAssertTrue(center.pending.allSatisfy { $0.content.body == "Nugget 0" })
+        XCTAssertTrue(center.pending.allSatisfy { $0.content.body == "Nugget 0 — Author 0 · Book 0" })
     }
 
     func testPausingOrEmptyingClearsTheQueue() async {
