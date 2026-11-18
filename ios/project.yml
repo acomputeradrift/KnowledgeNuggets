@@ -45,6 +45,24 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
         DEVELOPMENT_ASSET_PATHS: "\"KnowledgeNuggets/Preview Content\""
+        # The build-stamp script reads git and writes into the built Info.plist.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postBuildScripts:
+      - name: Stamp build commit and time
+        basedOnDependencyAnalysis: false
+        # Declared so it always runs after Xcode writes the Info.plist.
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          # Shown in Settings so you can tell which build is on the phone.
+          PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          COMMIT=$(git -C "${SRCROOT}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+          if ! git -C "${SRCROOT}" diff --quiet HEAD -- 2>/dev/null; then COMMIT="${COMMIT}+changes"; fi
+          STAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          /usr/libexec/PlistBuddy -c "Delete :KNBuildCommit" "$PLIST" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Delete :KNBuildDate" "$PLIST" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add :KNBuildCommit string ${COMMIT}" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :KNBuildDate string ${STAMP}" "$PLIST"
   KnowledgeNuggetsTests:
     type: bundle.unit-test
     platform: iOS

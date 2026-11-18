@@ -21,6 +21,7 @@ struct SettingsView: View {
                     LabeledContent("Inactive", value: "\(model.inactive.count)")
                     LabeledContent("Notifications Queued", value: "\(model.scheduledCount)")
                 }
+                aboutSection
             }
             .navigationTitle("Settings")
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
@@ -39,6 +40,16 @@ struct SettingsView: View {
     }
 
     // MARK: Sections
+
+    private var aboutSection: some View {
+        let info = AppInfo.current
+        return Section("About") {
+            LabeledContent("Version", value: info.versionText)
+            if let built = info.builtText() {
+                LabeledContent("Built", value: built)
+            }
+        }
+    }
 
     private var notificationSection: some View {
         Section {
