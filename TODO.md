@@ -27,7 +27,7 @@
 - [x] **Every action the user starts confirms that it worked (except reordering).** This covers editing, deleting, moving, the Settings changes and import. Adding has its own celebration.
 
 ### Open
-- [ ] **Choose the success sound.** It's currently the original two-note ding, which you don't love. You're auditioning the iOS and Mac sounds.
+- [x] **Choose the success sound.** Decided: keep the original two-note rising ding.
 
 ## v2 ideas
 - [ ] **Search Nuggets:** browse and add nuggets shared by the community. This needs a backend, so it's out of scope for the local-only v1.
