@@ -12,15 +12,12 @@ struct PlannedNotification: Equatable, Sendable {
     /// Year, month, day, hour and minute with no time zone, so it fires at
     /// the same local time when the phone changes time zone.
     var dateComponents: DateComponents
-    /// The quote, with who it's by and where it's from at the end. There's no
-    /// title or subtitle: iOS already shows the app name, and every line they
-    /// took was one less line of the quote before it's cut off.
+    /// Who it's by and where it's from. iOS always shows one bold line above the
+    /// text (the app name when there's no title), so the attribution goes there
+    /// and the quote keeps every line of the body. Empty for affirmations.
+    var title: String
+    /// The quote alone.
     var body: String
-
-    static func body(text: String, attribution: String?) -> String {
-        guard let attribution, !attribution.isEmpty else { return text }
-        return "\(text) — \(attribution)"
-    }
 }
 
 /// The parts of `UNUserNotificationCenter` the scheduler uses, so tests can fake it.
@@ -121,7 +118,8 @@ final class NotificationScheduler: @unchecked Sendable {
                     nuggetID: nugget.id,
                     fireDate: fireDate,
                     dateComponents: components,
-                    body: PlannedNotification.body(text: nugget.text, attribution: nugget.attribution)
+                    title: nugget.attribution ?? "",
+                    body: nugget.text
                 )
             )
         }
@@ -134,6 +132,7 @@ final class NotificationScheduler: @unchecked Sendable {
 
     static func request(for planned: PlannedNotification) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
+        content.title = planned.title
         content.body = planned.body
         content.sound = .default
         content.userInfo = [PlannedNotification.nuggetIDKey: planned.nuggetID.uuidString]
