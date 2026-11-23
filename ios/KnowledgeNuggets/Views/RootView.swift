@@ -14,17 +14,13 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(NotificationRouter.self) private var router
     @Environment(\.scenePhase) private var scenePhase
-    @State private var tab: AppTab
     @State private var openedNugget: NuggetLink?
     /// The app's one confirmation toast, shown above everything, sheets included.
     @State private var toasts = ToastCenter()
 
-    init(initialTab: AppTab = .today) {
-        _tab = State(initialValue: initialTab)
-    }
-
     var body: some View {
-        TabView(selection: $tab) {
+        @Bindable var model = model
+        TabView(selection: $model.selectedTab) {
             TodayView()
                 .tabItem { Label("Today", systemImage: "sun.max") }
                 .tag(AppTab.today)

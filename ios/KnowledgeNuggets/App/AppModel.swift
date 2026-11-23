@@ -19,6 +19,9 @@ final class AppModel {
     private(set) var today: Date
     /// Set when a store call fails, so a screen can say so.
     var errorMessage: String?
+    /// The selected tab. Here rather than in RootView so a sheet can switch it,
+    /// like the save celebration's Go to Nuggets.
+    var selectedTab: AppTab = .today
 
     @ObservationIgnored let store: NuggetStore
     @ObservationIgnored private let scheduler: NotificationScheduler

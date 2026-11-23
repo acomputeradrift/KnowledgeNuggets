@@ -1,7 +1,7 @@
 import Foundation
 
-/// What the editor celebrates after a new nugget is saved: the headline, the
-/// progress toward a full rotation and whether the sheet closes on its own.
+/// What the editor shows after a new nugget is saved: which layout, the
+/// headline, the progress ring or the info box, and the main button.
 /// Built from counts only, so it can be tested without any views.
 struct SaveCelebration: Equatable, Sendable {
     /// Active nuggets after the save.
@@ -26,6 +26,47 @@ struct SaveCelebration: Equatable, Sendable {
     /// The nugget was saved as inactive, for either reason.
     var keptInactive: Bool { outcome != .active }
 
+    // MARK: Layout
+
+    /// What sits between the headline and the buttons.
+    enum Layout: Equatable, Sendable {
+        /// Added to Active: the progress ring.
+        case progress
+        /// Kept inactive because the rotation is full: an info box with the
+        /// two steps to swap it in.
+        case rotationFull
+        /// Saved as inactive on purpose: an info box with one step.
+        case switchedOff
+    }
+
+    var layout: Layout {
+        switch outcome {
+        case .active: return .progress
+        case .keptInactiveLimitReached: return .rotationFull
+        case .inactive: return .switchedOff
+        }
+    }
+
+    /// The main button. Done is always offered under it.
+    enum PrimaryAction: Equatable, Sendable {
+        case addAnother
+        /// Closes the sheet and switches to the Nuggets tab.
+        case goToNuggets
+
+        var title: String {
+            switch self {
+            case .addAnother: return "Add Another"
+            case .goToNuggets: return "Go to Nuggets"
+            }
+        }
+    }
+
+    var primaryAction: PrimaryAction {
+        layout == .rotationFull ? .goToNuggets : .addAnother
+    }
+
+    // MARK: Headline
+
     /// A count worth marking. Only reached when this save added to the rotation.
     enum Milestone: Equatable, Sendable {
         case first, firstWeek, twoWeeks, full
@@ -44,27 +85,48 @@ struct SaveCelebration: Equatable, Sendable {
 
     var headline: String {
         switch milestone {
-        case .first: return "Your first nugget!"
-        case .firstWeek: return "Your first week is full"
+        case .first: return "Your first nugget"
+        case .firstWeek: return "One week of nuggets"
         case .twoWeeks: return "Two weeks of nuggets"
         case .full: return "Your rotation is full"
-        case nil: return "Nugget saved!"
+        case nil: return "Nugget saved"
         }
     }
 
-    /// A line under the headline, only for milestones.
-    var subtext: String? {
-        switch milestone {
-        case .first: return "This is the start of your daily rotation."
-        case .firstWeek: return "Something different every day for a week."
-        case .twoWeeks: return "You're two-thirds of the way to a full rotation."
-        case .full: return "Three weeks of nuggets, one each day."
-        case nil: return nil
+    // MARK: Info box
+
+    /// The card shown in place of the ring when the nugget went to Inactive.
+    struct InfoBox: Equatable, Sendable {
+        let title: String
+        let message: String
+        /// Shown as numbered steps.
+        let steps: [String]
+    }
+
+    var infoBox: InfoBox? {
+        let message = "It won't come up in your daily rotation until you move it to Active."
+        switch layout {
+        case .progress:
+            return nil
+        case .rotationFull:
+            return InfoBox(
+                title: "Your \(limit) active spots are full",
+                message: message,
+                steps: ["Swipe an active nugget to Inactive", "Swipe this one to Active"]
+            )
+        case .switchedOff:
+            return InfoBox(
+                title: "Added to Inactive",
+                message: message,
+                steps: ["Swipe it to Active when you're ready"]
+            )
         }
     }
 
-    /// The rotation has no spots left.
-    var isFull: Bool { activeCount >= limit }
+    // MARK: Progress
+
+    /// The ring is only shown when the nugget joined the rotation.
+    var showsProgress: Bool { layout == .progress }
 
     /// Share of the rotation filled, from 0 to 1.
     var progress: Double { min(Double(activeCount) / Double(limit), 1) }
@@ -77,41 +139,15 @@ struct SaveCelebration: Equatable, Sendable {
     /// For example "8 of 21".
     var progressLabel: String { "\(min(activeCount, limit)) of \(limit)" }
 
-    /// The count turned into days.
-    var daysLine: String {
-        switch activeCount {
-        case 0: return "Add nuggets to start your rotation."
-        case 1: return "Each nugget you add is another day before anything repeats."
-        default: return "\(activeCount) days before anything repeats."
-        }
-    }
-
-    /// The small note at the bottom, the only part that differs between Active and Inactive.
-    var note: String {
-        switch outcome {
-        case .active: return "Added to the end of your rotation."
-        case .keptInactiveLimitReached: return "Added as Inactive. Your rotation is full."
-        case .inactive: return "Added as Inactive."
-        }
-    }
+    // MARK: Feedback
 
     /// Confetti and a stronger haptic.
     var isBigCelebration: Bool { milestone == .full }
 
-    /// The sheet closes on its own once the rotation is full, since there's
-    /// nothing left to fill. The view also checks VoiceOver.
-    var closesAutomatically: Bool { isFull }
-
-    /// How long the sheet stays up before closing on its own: long enough to
-    /// read the headline, ring and note. A tap or Done closes it sooner.
-    static let autoCloseDelay: Duration = .seconds(4)
-
-    /// Add Another is offered while there are spots left.
-    var offersAddAnother: Bool { !isFull }
-
-    /// What VoiceOver reads when the screen appears.
+    /// What VoiceOver reads when the screen appears: the headline, then the
+    /// ring's count or the box's title.
     var announcement: String {
-        let headline = headline.last.map { ".!?".contains($0) } == true ? headline : headline + "."
-        return "\(headline) \(note)"
+        let detail = infoBox?.title ?? progressLabel
+        return "\(headline). \(detail)."
     }
 }

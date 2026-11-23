@@ -38,7 +38,12 @@ struct NuggetEditorView: View {
     var body: some View {
         ZStack {
             if let celebration {
-                SaveCelebrationView(celebration: celebration, onAddAnother: addAnother, onDone: { dismiss() })
+                SaveCelebrationView(
+                    celebration: celebration,
+                    onAddAnother: addAnother,
+                    onGoToNuggets: goToNuggets,
+                    onDone: { dismiss() }
+                )
                     .transition(.opacity)
             } else {
                 editor
@@ -216,6 +221,13 @@ struct NuggetEditorView: View {
                 }
             }
         }
+    }
+
+    /// Closes the sheet and shows the Nuggets tab, where the new inactive
+    /// nugget can be swiped to Active once a spot is free.
+    private func goToNuggets() {
+        dismiss()
+        model.selectedTab = .nuggets
     }
 
     /// Back to a fresh form that keeps the kind and source, so several nuggets

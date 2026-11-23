@@ -112,7 +112,7 @@ final class AppModelTests: XCTestCase {
 
         let result = model.save(NuggetDraft(text: "Off", kind: .affirmation, isActive: false))
         XCTAssertEqual(result, SaveCelebration(activeCount: 1, outcome: .inactive))
-        XCTAssertEqual(result?.note, "Added as Inactive.")
+        XCTAssertEqual(result?.layout, .switchedOff)
         XCTAssertNil(result?.milestone)
         XCTAssertEqual(model.active.map(\.text), ["B"])
         XCTAssertEqual(model.inactive.map(\.text), ["A", "Off"])
@@ -124,7 +124,8 @@ final class AppModelTests: XCTestCase {
         for index in 0..<21 { model.save(NuggetDraft(text: "N\(index)", kind: .affirmation)) }
         model.save(NuggetDraft(text: "Off", kind: .affirmation, isActive: false))
         let result = model.save(NuggetDraft(text: "Waiting", kind: .affirmation))
-        XCTAssertEqual(result?.note, "Added as Inactive. Your rotation is full.")
+        XCTAssertEqual(result?.layout, .rotationFull)
+        XCTAssertEqual(result?.primaryAction, .goToNuggets)
         XCTAssertEqual(model.inactive.map(\.text), ["Waiting", "Off"])
         XCTAssertNil(model.inactive[0].deactivatedAt)
     }

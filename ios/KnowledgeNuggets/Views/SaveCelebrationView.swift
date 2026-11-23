@@ -1,22 +1,30 @@
 import SwiftUI
 
-/// Shown in the editor sheet after a new nugget is saved. Looks the same whether
-/// the nugget went to Active or Inactive; only the note at the bottom differs.
+/// Shown in the editor sheet after a new nugget is saved. The check and
+/// headline sit at the top and the buttons at the bottom; between them,
+/// centered, is the progress ring when the nugget joined the rotation, or an
+/// info box when it went to Inactive. It stays until a button is tapped.
 struct SaveCelebrationView: View {
     let celebration: SaveCelebration
     let onAddAnother: () -> Void
+    let onGoToNuggets: () -> Void
     let onDone: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @ScaledMetric(relativeTo: .largeTitle) private var checkSize: CGFloat = 88
     @State private var appeared = false
     @State private var burst = false
     @State private var ringProgress: Double
 
-    init(celebration: SaveCelebration, onAddAnother: @escaping () -> Void, onDone: @escaping () -> Void) {
+    init(
+        celebration: SaveCelebration,
+        onAddAnother: @escaping () -> Void,
+        onGoToNuggets: @escaping () -> Void,
+        onDone: @escaping () -> Void
+    ) {
         self.celebration = celebration
         self.onAddAnother = onAddAnother
+        self.onGoToNuggets = onGoToNuggets
         self.onDone = onDone
         _ringProgress = State(initialValue: celebration.previousProgress)
         // Warm up the audio session and chime while the sheet is presented, so
@@ -24,34 +32,27 @@ struct SaveCelebrationView: View {
         Task { @MainActor in SoundPlayer.shared.preload(SoundPlayer.saveCelebration) }
     }
 
-    private var closesAutomatically: Bool {
-        celebration.closesAutomatically && !voiceOverEnabled
-    }
-
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
-                VStack(spacing: 28) {
-                    Spacer(minLength: 12)
+                // Equal flexible spacers keep the ring or box centered between
+                // the headline and the buttons; at large text sizes the content
+                // outgrows the screen and scrolls instead.
+                VStack(spacing: 0) {
                     header
-                    RotationProgressRing(progress: ringProgress, celebration: celebration)
-                    Text(celebration.daysLine)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Spacer(minLength: 12)
-                    footer
+                    Spacer(minLength: 28)
+                    middle
+                    Spacer(minLength: 28)
+                    buttons
                 }
                 .padding(.horizontal, 24)
-                .padding(.vertical, 16)
+                .padding(.top, 32)
+                .padding(.bottom, 16)
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
             .scrollBounceBehavior(.basedOnSize)
         }
         .background(Color(.systemGroupedBackground))
-        .contentShape(Rectangle())
-        // Once the rotation is full, a tap anywhere closes the sheet early.
-        .onTapGesture { if celebration.closesAutomatically { onDone() } }
         .overlay {
             if celebration.isBigCelebration && !reduceMotion {
                 ConfettiView()
@@ -63,12 +64,6 @@ struct SaveCelebrationView: View {
         .sensoryFeedback(.success, trigger: appeared) { _, new in new }
         .sensoryFeedback(.impact(weight: .heavy, intensity: 1), trigger: burst) { _, new in new }
         .onAppear(perform: start)
-        .task {
-            guard closesAutomatically else { return }
-            // Cancelled when the sheet goes away first, so it never closes twice.
-            guard (try? await Task.sleep(for: SaveCelebration.autoCloseDelay)) != nil else { return }
-            onDone()
-        }
     }
 
     private var header: some View {
@@ -85,34 +80,28 @@ struct SaveCelebrationView: View {
                 .font(.largeTitle.bold())
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
-
-            if let subtext = celebration.subtext {
-                Text(subtext)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
         }
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var footer: some View {
-        VStack(spacing: 12) {
-            Text(celebration.note)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 4)
+    @ViewBuilder
+    private var middle: some View {
+        if let box = celebration.infoBox {
+            SaveInfoBox(box: box)
+        } else {
+            RotationProgressRing(progress: ringProgress, celebration: celebration)
+        }
+    }
 
-            if celebration.offersAddAnother {
-                Button(action: onAddAnother) {
-                    Text("Add Another")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .primaryActionStyle()
-                .controlSize(.large)
+    private var buttons: some View {
+        VStack(spacing: 12) {
+            Button(action: primaryAction) {
+                Text(celebration.primaryAction.title)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
+            .primaryActionStyle()
+            .controlSize(.large)
 
             Button(action: onDone) {
                 Text("Done")
@@ -121,6 +110,13 @@ struct SaveCelebrationView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+        }
+    }
+
+    private func primaryAction() {
+        switch celebration.primaryAction {
+        case .addAnother: onAddAnother()
+        case .goToNuggets: onGoToNuggets()
         }
     }
 
@@ -143,6 +139,50 @@ struct SaveCelebrationView: View {
             try? await Task.sleep(for: .seconds(0.6))
             AccessibilityNotification.Announcement(celebration.announcement).post()
         }
+    }
+}
+
+/// Why the nugget went to Inactive and how to bring it into the rotation.
+struct SaveInfoBox: View {
+    let box: SaveCelebration.InfoBox
+
+    @ScaledMetric(relativeTo: .subheadline) private var stepSize: CGFloat = 24
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(box.title)
+                    .font(.headline)
+                Text(box.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(box.steps.enumerated()), id: \.offset) { index, step in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("\(index + 1)")
+                            .font(.footnote.bold())
+                            .monospacedDigit()
+                            .foregroundStyle(Color(.systemBackground))
+                            .frame(width: stepSize, height: stepSize)
+                            .background(Circle().fill(Color("AccentColor")))
+                            .accessibilityHidden(true)
+                        Text(step)
+                            .font(.subheadline)
+                            .accessibilityLabel("Step \(index + 1): \(step)")
+                    }
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color(.separator), lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -256,22 +296,18 @@ struct ConfettiPiece {
     }
 }
 
-#Preview("Saved") {
-    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, keptInactive: false), onAddAnother: {}, onDone: {})
+#Preview("A: added, 8 of 21") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, outcome: .active), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
 }
 
-#Preview("First week") {
-    SaveCelebrationView(celebration: SaveCelebration(activeCount: 7, keptInactive: false), onAddAnother: {}, onDone: {})
+#Preview("A: rotation full, confetti") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, outcome: .active), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
 }
 
-#Preview("Rotation full") {
-    SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, keptInactive: false), onAddAnother: {}, onDone: {})
+#Preview("B: kept inactive, rotation full") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, outcome: .keptInactiveLimitReached), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
 }
 
-#Preview("Switched off") {
-    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, outcome: .inactive), onAddAnother: {}, onDone: {})
-}
-
-#Preview("Kept inactive") {
-    SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, keptInactive: true), onAddAnother: {}, onDone: {})
+#Preview("C: switched off") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, outcome: .inactive), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
 }

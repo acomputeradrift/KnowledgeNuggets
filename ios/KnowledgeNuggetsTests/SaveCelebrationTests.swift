@@ -6,6 +6,65 @@ final class SaveCelebrationTests: XCTestCase {
         SaveCelebration(activeCount: count, limit: 21, keptInactive: false)
     }
 
+    private var keptFull: SaveCelebration {
+        SaveCelebration(activeCount: 21, limit: 21, outcome: .keptInactiveLimitReached)
+    }
+
+    private func switchedOff(_ count: Int = 8) -> SaveCelebration {
+        SaveCelebration(activeCount: count, limit: 21, outcome: .inactive)
+    }
+
+    // MARK: Layout
+
+    func testAddedToActiveShowsTheRingWithAddAnother() {
+        for count in [1, 7, 8, 14, 20, 21] {
+            let celebration = added(count)
+            XCTAssertEqual(celebration.layout, .progress, "\(count)")
+            XCTAssertTrue(celebration.showsProgress, "\(count)")
+            XCTAssertNil(celebration.infoBox, "\(count)")
+            XCTAssertEqual(celebration.primaryAction, .addAnother, "\(count)")
+        }
+    }
+
+    func testKeptInactiveBecauseFullShowsTheTwoStepBoxWithGoToNuggets() {
+        let kept = keptFull
+        XCTAssertEqual(kept.layout, .rotationFull)
+        XCTAssertFalse(kept.showsProgress)
+        XCTAssertEqual(kept.primaryAction, .goToNuggets)
+        XCTAssertEqual(kept.primaryAction.title, "Go to Nuggets")
+        XCTAssertEqual(kept.infoBox, SaveCelebration.InfoBox(
+            title: "Your 21 active spots are full",
+            message: "It won't come up in your daily rotation until you move it to Active.",
+            steps: ["Swipe an active nugget to Inactive", "Swipe this one to Active"]
+        ))
+    }
+
+    func testSwitchedOffShowsTheOneStepBoxWithAddAnother() {
+        let off = switchedOff()
+        XCTAssertEqual(off.layout, .switchedOff)
+        XCTAssertFalse(off.showsProgress)
+        XCTAssertEqual(off.primaryAction, .addAnother)
+        XCTAssertEqual(off.primaryAction.title, "Add Another")
+        XCTAssertEqual(off.infoBox, SaveCelebration.InfoBox(
+            title: "Added to Inactive",
+            message: "It won't come up in your daily rotation until you move it to Active.",
+            steps: ["Swipe it to Active when you're ready"]
+        ))
+        XCTAssertNotEqual(off, SaveCelebration(activeCount: 8, limit: 21, outcome: .keptInactiveLimitReached))
+    }
+
+    func testSwitchedOffWhileFullStillReadsAsSwitchedOff() {
+        let off = switchedOff(21)
+        XCTAssertEqual(off.layout, .switchedOff)
+        XCTAssertEqual(off.infoBox?.title, "Added to Inactive")
+        XCTAssertEqual(off.primaryAction, .addAnother)
+    }
+
+    func testFullBoxUsesTheLimitItIsGiven() {
+        let small = SaveCelebration(activeCount: 5, limit: 5, keptInactive: true)
+        XCTAssertEqual(small.infoBox?.title, "Your 5 active spots are full")
+    }
+
     // MARK: Milestones
 
     func testMilestonesAtOneSevenFourteenAndTwentyOne() {
@@ -19,20 +78,25 @@ final class SaveCelebrationTests: XCTestCase {
     }
 
     func testHeadlines() {
-        XCTAssertEqual(added(1).headline, "Your first nugget!")
-        XCTAssertEqual(added(7).headline, "Your first week is full")
+        XCTAssertEqual(added(1).headline, "Your first nugget")
+        XCTAssertEqual(added(7).headline, "One week of nuggets")
         XCTAssertEqual(added(14).headline, "Two weeks of nuggets")
         XCTAssertEqual(added(21).headline, "Your rotation is full")
-        XCTAssertEqual(added(8).headline, "Nugget saved!")
-        XCTAssertNil(added(8).subtext)
-        XCTAssertNotNil(added(7).subtext)
+        XCTAssertEqual(added(8).headline, "Nugget saved")
     }
 
-    func testKeptInactiveIsNeverAMilestone() {
-        let kept = SaveCelebration(activeCount: 21, limit: 21, keptInactive: true)
-        XCTAssertNil(kept.milestone)
-        XCTAssertEqual(kept.headline, "Nugget saved!")
-        XCTAssertFalse(kept.isBigCelebration)
+    func testHeadlinesHaveNoExclamationMarks() {
+        for celebration in [added(1), added(7), added(8), added(14), added(21), keptFull, switchedOff()] {
+            XCTAssertFalse(celebration.headline.contains("!"), celebration.headline)
+        }
+    }
+
+    func testInactiveSavesAreNeverAMilestone() {
+        for celebration in [keptFull, switchedOff(7), switchedOff(21)] {
+            XCTAssertNil(celebration.milestone)
+            XCTAssertEqual(celebration.headline, "Nugget saved")
+            XCTAssertFalse(celebration.isBigCelebration)
+        }
     }
 
     func testOnlyAFullRotationGetsConfetti() {
@@ -42,74 +106,11 @@ final class SaveCelebrationTests: XCTestCase {
         }
     }
 
-    // MARK: Note
-
-    func testNoteSaysWhereTheNuggetWent() {
-        XCTAssertEqual(added(8).note, "Added to the end of your rotation.")
-        XCTAssertEqual(added(21).note, "Added to the end of your rotation.")
-        XCTAssertEqual(
-            SaveCelebration(activeCount: 21, limit: 21, keptInactive: true).note,
-            "Added as Inactive. Your rotation is full."
-        )
-    }
-
-    func testSwitchedOffSaysInactiveWithoutMentioningAFullRotation() {
-        let off = SaveCelebration(activeCount: 7, limit: 21, outcome: .inactive)
-        XCTAssertEqual(off.note, "Added as Inactive.")
-        XCTAssertTrue(off.keptInactive)
-        XCTAssertNil(off.milestone, "Only a save that added to the rotation is a milestone")
-        XCTAssertEqual(off.headline, "Nugget saved!")
-        XCTAssertFalse(off.isBigCelebration)
-        XCTAssertEqual(off.previousActiveCount, 7, "Nothing moved, so the ring doesn't grow")
-        XCTAssertTrue(off.offersAddAnother)
-        XCTAssertFalse(off.closesAutomatically)
-        XCTAssertEqual(off.announcement, "Nugget saved! Added as Inactive.")
-        XCTAssertNotEqual(off, SaveCelebration(activeCount: 7, limit: 21, outcome: .keptInactiveLimitReached))
-    }
-
-    func testNoteNeverMentionsNew() {
-        let all = [
-            added(3),
-            SaveCelebration(activeCount: 21, limit: 21, keptInactive: true),
-            SaveCelebration(activeCount: 3, limit: 21, outcome: .inactive),
-        ]
-        for celebration in all {
-            XCTAssertFalse(celebration.note.localizedCaseInsensitiveContains("new"))
-        }
-    }
-
     func testOutcomeInitializer() {
         XCTAssertFalse(SaveCelebration(activeCount: 3, limit: 21, outcome: .active).keptInactive)
-        XCTAssertTrue(SaveCelebration(activeCount: 21, limit: 21, outcome: .keptInactiveLimitReached).keptInactive)
-        XCTAssertTrue(SaveCelebration(activeCount: 3, limit: 21, outcome: .inactive).keptInactive)
-        XCTAssertEqual(
-            SaveCelebration(activeCount: 21, limit: 21, keptInactive: true),
-            SaveCelebration(activeCount: 21, limit: 21, outcome: .keptInactiveLimitReached)
-        )
-    }
-
-    // MARK: Closing
-
-    func testStaysOpenWithAddAnotherUntilFull() {
-        for count in [1, 7, 14, 20] {
-            XCTAssertFalse(added(count).closesAutomatically, "\(count)")
-            XCTAssertTrue(added(count).offersAddAnother, "\(count)")
-        }
-    }
-
-    func testClosesAutomaticallyWhenFullEitherWay() {
-        let filled = added(21)
-        let kept = SaveCelebration(activeCount: 21, limit: 21, keptInactive: true)
-        for celebration in [filled, kept] {
-            XCTAssertTrue(celebration.isFull)
-            XCTAssertTrue(celebration.closesAutomatically)
-            XCTAssertFalse(celebration.offersAddAnother)
-        }
-    }
-
-    func testAutoCloseLeavesTimeToRead() {
-        XCTAssertEqual(SaveCelebration.autoCloseDelay, .seconds(4))
-        XCTAssertGreaterThanOrEqual(SaveCelebration.autoCloseDelay, .seconds(3), "Too quick to read the headline, ring and note")
+        XCTAssertTrue(keptFull.keptInactive)
+        XCTAssertTrue(switchedOff(3).keptInactive)
+        XCTAssertEqual(SaveCelebration(activeCount: 21, limit: 21, keptInactive: true), keptFull)
     }
 
     // MARK: Sound
@@ -128,31 +129,24 @@ final class SaveCelebrationTests: XCTestCase {
         XCTAssertEqual(added(8).progress, 8.0 / 21.0, accuracy: 0.0001)
         XCTAssertEqual(added(8).previousActiveCount, 7)
         XCTAssertEqual(added(21).progress, 1)
-        let kept = SaveCelebration(activeCount: 21, limit: 21, keptInactive: true)
-        XCTAssertEqual(kept.previousActiveCount, 21, "Nothing moved, so the ring doesn't grow")
-        XCTAssertEqual(kept.progressLabel, "21 of 21")
-    }
-
-    func testDaysLine() {
-        XCTAssertEqual(added(8).daysLine, "8 days before anything repeats.")
-        XCTAssertEqual(added(21).daysLine, "21 days before anything repeats.")
-        XCTAssertFalse(added(1).daysLine.contains("1 days"))
+        XCTAssertEqual(keptFull.previousActiveCount, 21, "Nothing moved")
+        XCTAssertEqual(switchedOff(7).previousActiveCount, 7, "Nothing moved")
     }
 
     func testUsesTheLimitItIsGiven() {
         let small = SaveCelebration(activeCount: 5, limit: 5, keptInactive: false)
         XCTAssertEqual(small.milestone, .full)
-        XCTAssertTrue(small.closesAutomatically)
+        XCTAssertEqual(small.progressLabel, "5 of 5")
         XCTAssertEqual(SaveCelebration(activeCount: 3, keptInactive: false).limit, NuggetRules.activeLimit)
     }
 
     // MARK: VoiceOver
 
-    func testAnnouncementReadsHeadlineAndNote() {
-        XCTAssertEqual(added(8).announcement, "Nugget saved! Added to the end of your rotation.")
-        XCTAssertEqual(
-            added(7).announcement,
-            "Your first week is full. Added to the end of your rotation."
-        )
+    func testAnnouncementReadsHeadlineAndRingOrBox() {
+        XCTAssertEqual(added(8).announcement, "Nugget saved. 8 of 21.")
+        XCTAssertEqual(added(7).announcement, "One week of nuggets. 7 of 21.")
+        XCTAssertEqual(added(21).announcement, "Your rotation is full. 21 of 21.")
+        XCTAssertEqual(keptFull.announcement, "Nugget saved. Your 21 active spots are full.")
+        XCTAssertEqual(switchedOff().announcement, "Nugget saved. Added to Inactive.")
     }
 }

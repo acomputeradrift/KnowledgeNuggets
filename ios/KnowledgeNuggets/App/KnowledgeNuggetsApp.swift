@@ -25,16 +25,18 @@ struct KnowledgeNuggetsApp: App {
         } else if let count = launch.seedActiveCount {
             SampleData.seed(into: store, activeCount: count)
         }
-        _model = State(initialValue: AppModel(
+        let model = AppModel(
             store: store,
             scheduler: NotificationScheduler(center: SystemNotificationCenter()),
             lookup: OpenLibraryLookup()
-        ))
+        )
+        model.selectedTab = launch.initialTab
+        _model = State(initialValue: model)
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView(initialTab: LaunchOptions.current.initialTab)
+            RootView()
                 .environment(model)
                 .environment(appDelegate.router)
         }
