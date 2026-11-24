@@ -1,7 +1,9 @@
 import Foundation
 
-/// The Nuggets list as one flat run of rows: a header for each section, then
-/// its nuggets (or a placeholder when it's empty).
+/// The Nuggets list as one flat run of rows: Active's nuggets first (its title
+/// is the list's real section header, so the card's top corners are rounded),
+/// then a header row for Queued and Paused, each followed by its nuggets (or a
+/// placeholder when a section is empty).
 ///
 /// SwiftUI's `onMove` never moves a row out of its `ForEach`, and its reorder
 /// drag never reaches another section's drop handler, so the list uses a
@@ -42,7 +44,7 @@ struct NuggetListLayout: Equatable {
     init(active: [UUID], queued: [UUID], paused: [UUID]) {
         var rows: [Row] = []
         for (state, ids) in [(NuggetState.active, active), (.queued, queued), (.paused, paused)] {
-            rows.append(.header(state))
+            if state != .active { rows.append(.header(state)) }
             if ids.isEmpty {
                 rows.append(.placeholder(state))
             } else {
@@ -54,8 +56,8 @@ struct NuggetListLayout: Equatable {
 
     /// Where the nugget at `source` lands when `onMove` reports `destination`
     /// (an insertion offset counted before the row is removed). The nearest
-    /// header above it names the section; a drop above the first header counts
-    /// as the top of Active. Nil when `source` isn't a nugget.
+    /// header above it names the section; with no header above, it's in Active.
+    /// Nil when `source` isn't a nugget.
     func destination(movingRowAt source: Int, toOffset destination: Int) -> Destination? {
         guard rows.indices.contains(source), rows[source].isMovable else { return nil }
         var moved = rows
@@ -73,6 +75,6 @@ struct NuggetListLayout: Equatable {
                 continue
             }
         }
-        return Destination(state: .active, index: 0)
+        return Destination(state: .active, index: index)
     }
 }

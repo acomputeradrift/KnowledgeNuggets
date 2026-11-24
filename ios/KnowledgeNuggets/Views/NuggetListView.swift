@@ -123,6 +123,20 @@ struct NuggetListView: View {
                 .onMove { source, destination in
                     drop(source, at: destination, in: layout)
                 }
+            } header: {
+                // A real section header, so the list's top corners round like
+                // its bottom ones. Queued and Paused are header rows below.
+                HStack(alignment: .firstTextBaseline) {
+                    Text(NuggetState.active.title)
+                    Spacer()
+                    Text("\(model.active.count) of \(NuggetRules.activeLimit)")
+                        .monospacedDigit()
+                }
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
             } footer: {
                 Text("Touch and hold a nugget to reorder it, or drag it to another section.")
             }
