@@ -29,5 +29,21 @@
 ### Open
 - [x] **Choose the success sound.** Decided: keep the original two-note rising ding.
 
+## 2026-11-23
+- [x] **Check for duplicates automatically** when a nugget is saved.
+- [x] **Quotation marks, consistently.** If the content already has quotes, don't add them; if it doesn't, add them.
+- [x] **Three states: Active, Queued and Paused.** "Inactive" is renamed Paused.
+  - A new nugget goes to the bottom of Queued.
+  - Nuggets can be dragged and reordered freely between Queued and Paused.
+  - Dragging from either into a full Active list shows a message: pause at least one to make room.
+- Decided:
+  - Duplicates are blocked. The match ignores capital letters, spacing, quotation marks and end punctuation.
+  - Every nugget is shown in quotation marks, affirmations included.
+  - Nothing moves into Active automatically.
+  - The add and edit forms use a three-way Active | Queued | Paused pill. Active is greyed out when 21 are active. A new nugget defaults to Active, or to Queued when full.
+  - Swipes keep their current look, with new wording: Active nuggets get "Pause"; Queued and Paused nuggets get "Activate".
+  - Paused is for nuggets the user doesn't want to see any time soon but doesn't want to delete.
+- Done.
+
 ## v2 ideas
 - [ ] **Search Nuggets:** browse and add nuggets shared by the community. This needs a backend, so it's out of scope for the local-only v1.

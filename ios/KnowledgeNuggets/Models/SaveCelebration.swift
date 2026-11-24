@@ -8,8 +8,8 @@ struct SaveCelebration: Equatable, Sendable {
     let activeCount: Int
     /// The most nuggets the rotation holds.
     let limit: Int
-    /// Where the nugget went: into the rotation, inactive because the rotation
-    /// was full, or inactive because the switch was turned off.
+    /// Where the nugget went: into Active, to Queued because Active was full,
+    /// or to the section chosen (Queued or Paused).
     let outcome: ActivationOutcome
 
     init(activeCount: Int, limit: Int = NuggetRules.activeLimit, outcome: ActivationOutcome) {
@@ -18,32 +18,32 @@ struct SaveCelebration: Equatable, Sendable {
         self.outcome = outcome
     }
 
-    /// `keptInactive: true` means the rotation was full.
-    init(activeCount: Int, limit: Int = NuggetRules.activeLimit, keptInactive: Bool) {
-        self.init(activeCount: activeCount, limit: limit, outcome: keptInactive ? .keptInactiveLimitReached : .active)
+    /// `activeFull: true` means it went to Queued because Active was full.
+    init(activeCount: Int, limit: Int = NuggetRules.activeLimit, activeFull: Bool) {
+        self.init(activeCount: activeCount, limit: limit, outcome: activeFull ? .queuedBecauseActiveFull : .active)
     }
 
-    /// The nugget was saved as inactive, for either reason.
-    var keptInactive: Bool { outcome != .active }
+    /// The nugget isn't in the rotation, for either reason.
+    var isOutOfRotation: Bool { outcome != .active }
 
     // MARK: Layout
 
     /// What sits between the headline and the buttons.
     enum Layout: Equatable, Sendable {
-        /// Added to Active: the progress ring.
+        /// A: added to Active, the progress ring.
         case progress
-        /// Kept inactive because the rotation is full: an info box with the
-        /// two steps to swap it in.
+        /// B: Active was full, so it went to the bottom of Queued: an info box
+        /// with the two steps to swap it in.
         case rotationFull
-        /// Saved as inactive on purpose: an info box with one step.
-        case switchedOff
+        /// C: Queued or Paused was chosen: an info box with one step.
+        case setAside
     }
 
     var layout: Layout {
         switch outcome {
         case .active: return .progress
-        case .keptInactiveLimitReached: return .rotationFull
-        case .inactive: return .switchedOff
+        case .queuedBecauseActiveFull: return .rotationFull
+        case .chose: return .setAside
         }
     }
 
@@ -73,7 +73,7 @@ struct SaveCelebration: Equatable, Sendable {
     }
 
     var milestone: Milestone? {
-        guard !keptInactive else { return nil }
+        guard !isOutOfRotation else { return nil }
         switch activeCount {
         case limit: return .full
         case 1: return .first
@@ -95,7 +95,7 @@ struct SaveCelebration: Equatable, Sendable {
 
     // MARK: Info box
 
-    /// The card shown in place of the ring when the nugget went to Inactive.
+    /// The card shown in place of the ring when the nugget went to Queued or Paused.
     struct InfoBox: Equatable, Sendable {
         let title: String
         let message: String
@@ -104,21 +104,21 @@ struct SaveCelebration: Equatable, Sendable {
     }
 
     var infoBox: InfoBox? {
-        let message = "It won't come up in your daily rotation until you move it to Active."
+        let message = "It won't come up in your daily rotation until you activate it."
         switch layout {
         case .progress:
             return nil
         case .rotationFull:
             return InfoBox(
                 title: "Your \(limit) active spots are full",
-                message: message,
-                steps: ["Swipe an active nugget to Inactive", "Swipe this one to Active"]
+                message: "It's at the bottom of your queue. \(message)",
+                steps: ["Pause an active nugget", "Swipe this one to Activate"]
             )
-        case .switchedOff:
+        case .setAside:
             return InfoBox(
-                title: "Added to Inactive",
+                title: "Added to \(outcome.state.title)",
                 message: message,
-                steps: ["Swipe it to Active when you're ready"]
+                steps: ["Swipe it to Activate when you're ready"]
             )
         }
     }
@@ -132,7 +132,7 @@ struct SaveCelebration: Equatable, Sendable {
     var progress: Double { min(Double(activeCount) / Double(limit), 1) }
 
     /// The count before this save, so the ring can grow into place.
-    var previousActiveCount: Int { keptInactive ? activeCount : max(0, activeCount - 1) }
+    var previousActiveCount: Int { isOutOfRotation ? activeCount : max(0, activeCount - 1) }
 
     var previousProgress: Double { min(Double(previousActiveCount) / Double(limit), 1) }
 

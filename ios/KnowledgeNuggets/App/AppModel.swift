@@ -7,8 +7,12 @@ import UserNotifications
 @MainActor
 @Observable
 final class AppModel {
+    /// The rotation, in order.
     private(set) var active: [Nugget] = []
-    private(set) var inactive: [Nugget] = []
+    /// Waiting for a spot, in the user's order.
+    private(set) var queued: [Nugget] = []
+    /// Set aside, in the user's order.
+    private(set) var paused: [Nugget] = []
     private(set) var settings: AppSettings
     private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     private(set) var scheduledCount = 0
@@ -49,10 +53,50 @@ final class AppModel {
         self.now = now
         self.today = calendar.startOfDay(for: now())
         self.settings = AppSettings.load(from: defaults)
+        runLaunchMigrations()
         reload()
     }
 
-    var isEmpty: Bool { active.isEmpty && inactive.isEmpty }
+    var isEmpty: Bool { active.isEmpty && queued.isEmpty && paused.isEmpty }
+
+    /// Every nugget: Active, then Queued, then Paused.
+    var all: [Nugget] { active + queued + paused }
+
+    func nuggets(in state: NuggetState) -> [Nugget] {
+        switch state {
+        case .active: return active
+        case .queued: return queued
+        case .paused: return paused
+        }
+    }
+
+    /// Whether `nugget` (or a new one, when nil) can be active: there's a free
+    /// spot, or it already is.
+    func canBeActive(_ nugget: Nugget?) -> Bool {
+        nugget?.isActive == true || active.count < NuggetRules.activeLimit
+    }
+
+    /// Where a new nugget starts in the editor: Active, or Queued when it's full.
+    var defaultNewState: NuggetState { canBeActive(nil) ? .active : .queued }
+
+    // MARK: Migrations
+
+    static let quotesMigratedKey = "migrations.quotesStripped"
+
+    /// Fills in states for nuggets saved before they existed (every launch,
+    /// since it only touches those), then, once, strips wrapping quotes from
+    /// stored texts so nothing shows double-quoted.
+    private func runLaunchMigrations() {
+        do {
+            try store.migrateLegacyStates()
+            if !defaults.bool(forKey: Self.quotesMigratedKey) {
+                try store.stripStoredQuotes()
+                defaults.set(true, forKey: Self.quotesMigratedKey)
+            }
+        } catch {
+            errorMessage = "Couldn't update your nuggets. \(error.localizedDescription)"
+        }
+    }
 
     // MARK: Rotation
 
@@ -91,8 +135,9 @@ final class AppModel {
 
     func reload() {
         do {
-            active = try store.activeNuggets()
-            inactive = try store.inactiveNuggets()
+            active = try store.nuggets(in: .active)
+            queued = try store.nuggets(in: .queued)
+            paused = try store.nuggets(in: .paused)
         } catch {
             errorMessage = "Couldn't load your nuggets. \(error.localizedDescription)"
         }
@@ -102,12 +147,17 @@ final class AppModel {
         try? store.nugget(id: id)
     }
 
+    /// The nugget that already has this content, other than `nugget` itself.
+    func duplicate(of text: String, excluding nugget: Nugget? = nil) -> Nugget? {
+        try? store.duplicate(of: text, excluding: nugget?.id)
+    }
+
     /// Adds or updates a nugget. For a new nugget, returns what to celebrate:
-    /// the active count after the save and where it went (the rotation, or
-    /// Inactive because the rotation was full or the switch was off). Edits go
-    /// through `update(_:with:)` and return nil here, as does a save that fails.
-    /// Does nothing unless the draft has content and, except for affirmations,
-    /// a By or From.
+    /// the active count after the save and where it went (Active, Queued
+    /// because Active was full, or the section chosen). Edits go through
+    /// `update(_:with:)` and return nil here, as does a save that fails or is
+    /// refused. Does nothing unless the draft has content, isn't a duplicate
+    /// and, except for affirmations, has a By or From.
     @discardableResult
     func save(_ draft: NuggetDraft, editing nugget: Nugget? = nil) -> SaveCelebration? {
         guard draft.canSave else { return nil }
@@ -115,8 +165,9 @@ final class AppModel {
             update(nugget, with: draft)
             return nil
         }
+        guard duplicate(of: draft.text) == nil else { return nil }
         do {
-            let (added, outcome) = try store.add(draft, active: draft.isActive)
+            let (added, outcome) = try store.add(draft, state: draft.state)
             didChange()
             lookUpMissingMetadata(for: added)
             return SaveCelebration(activeCount: active.count, outcome: outcome)
@@ -129,24 +180,24 @@ final class AppModel {
     /// What an edit did, for its confirmation.
     enum EditResult: Equatable {
         case updated
-        /// The edit also flipped the Active switch.
-        case moved(ActiveMove)
+        /// The edit also changed the section.
+        case moved(StateMove)
     }
 
-    /// Saves an edit. A flipped Active switch goes through the same rules as the
-    /// list's swipe action. Returns nil when nothing was saved.
+    /// Saves an edit. A changed section goes through the same rules as the
+    /// list: to the bottom of the new section, and into Active only when
+    /// there's room. Returns nil when nothing was saved (invalid or a duplicate).
     @discardableResult
     func update(_ nugget: Nugget, with draft: NuggetDraft) -> EditResult? {
-        guard draft.canSave else { return nil }
+        guard draft.canSave, duplicate(of: draft.text, excluding: nugget) == nil else { return nil }
         let before = MoveOrigin(nugget, in: self)
         var result = EditResult.updated
         do {
             try store.update(nugget, with: draft)
-            if draft.isActive != nugget.isActive {
-                // Refused (rotation full) leaves it inactive; the editor disables the switch then.
-                let outcome = try store.setActive(nugget, draft.isActive)
-                if outcome != .keptInactiveLimitReached {
-                    result = .moved(before.move(to: draft.isActive))
+            if draft.state != before.state {
+                // Refused (Active full) leaves it where it was; the editor greys Active out then.
+                if try store.place(nugget, in: draft.state, at: nil) == .moved {
+                    result = .moved(before.move(to: draft.state))
                 }
             }
             didChange()
@@ -158,25 +209,27 @@ final class AppModel {
         return result
     }
 
-    // MARK: Moving between Active and Inactive
+    // MARK: Moving between sections
 
-    /// A move between Active and Inactive, with what's needed to undo it.
-    struct ActiveMove: Equatable {
+    /// A move from one section to another, with what's needed to undo it.
+    struct StateMove: Equatable {
         let nuggetID: UUID
-        /// Where it went: true when it moved into the rotation.
-        let isActive: Bool
-        /// Its position in the list it left.
+        let from: NuggetState
+        let to: NuggetState
+        /// Its position in the section it left.
         let previousIndex: Int
-        /// Its `deactivatedAt` before the move, which places it in the Inactive list.
-        let previousDeactivatedAt: Date?
 
-        var message: String { isActive ? "Moved to Active" : "Moved to Inactive" }
+        var message: String { "Moved to \(to.title)" }
+        /// Only a move into Active plays the success haptic.
+        var entersActive: Bool { to == .active }
     }
 
     enum MoveResult: Equatable {
-        case moved(ActiveMove)
-        /// Refused because the rotation is full; the message explains it.
-        case rotationFull(String)
+        case moved(StateMove)
+        /// Reordered within its section; no confirmation.
+        case reordered
+        /// Refused because Active is full; the message explains it.
+        case activeFull(String)
         /// Already there.
         case unchanged
         /// The store failed; `errorMessage` says so.
@@ -186,72 +239,55 @@ final class AppModel {
     /// Where a nugget sat before a move.
     private struct MoveOrigin {
         let id: UUID
+        let state: NuggetState
         let index: Int
-        let deactivatedAt: Date?
 
         @MainActor
         init(_ nugget: Nugget, in model: AppModel) {
-            let list = nugget.isActive ? model.active : model.inactive
+            let list = model.nuggets(in: nugget.nuggetState)
             id = nugget.id
+            state = nugget.nuggetState
             index = list.firstIndex { $0.id == nugget.id } ?? list.count
-            deactivatedAt = nugget.deactivatedAt
         }
 
-        func move(to isActive: Bool) -> ActiveMove {
-            ActiveMove(nuggetID: id, isActive: isActive, previousIndex: index, previousDeactivatedAt: deactivatedAt)
+        func move(to state: NuggetState) -> StateMove {
+            StateMove(nuggetID: id, from: self.state, to: state, previousIndex: index)
         }
     }
 
-    /// Moves a nugget into or out of the rotation, by the store's rules: moving
-    /// in appends to the rotation unless it's full, moving out stamps `deactivatedAt`.
-    func move(_ nugget: Nugget, toActive isActive: Bool) -> MoveResult {
-        guard nugget.isActive != isActive else { return .unchanged }
+    /// Moves a nugget to `state` at `index` (the bottom when nil): a swipe, a
+    /// drag within or between sections, or the editor. Into Active is refused
+    /// when it's full; nothing else ever moves into Active.
+    func move(_ nugget: Nugget, to state: NuggetState, at index: Int? = nil) -> MoveResult {
         let before = MoveOrigin(nugget, in: self)
         do {
-            let outcome = try store.setActive(nugget, isActive)
-            if outcome == .keptInactiveLimitReached {
-                return .rotationFull(outcome.message ?? NuggetRules.activeLimitReachedNote)
+            switch try store.place(nugget, in: state, at: index) {
+            case .moved:
+                didChange()
+                return .moved(before.move(to: state))
+            case .reordered:
+                didChange()
+                return .reordered
+            case .unchanged:
+                return .unchanged
+            case .activeFull:
+                return .activeFull(NuggetRules.activeFullMessage)
             }
-            didChange()
-            return .moved(before.move(to: isActive))
         } catch {
             errorMessage = "Couldn't update the nugget. \(error.localizedDescription)"
             return .failed
         }
     }
 
-    /// Returns the limit message when it was refused, nil otherwise.
+    /// Puts a moved nugget back in the section and position it came from.
+    /// Returns a message when Active filled up meanwhile, so it can't go back
+    /// in. Does nothing if it has been moved again or deleted since.
     @discardableResult
-    func setActive(_ nugget: Nugget, _ isActive: Bool) -> String? {
-        if case .rotationFull(let message) = move(nugget, toActive: isActive) { return message }
-        return nil
-    }
-
-    /// Puts a moved nugget back where it was: the same state, and the same
-    /// position in that list when it can. Returns a message when the rotation
-    /// filled up meanwhile, so it can't go back in. Does nothing if it has
-    /// been moved again or deleted since.
-    @discardableResult
-    func undo(_ move: ActiveMove) -> String? {
-        guard let nugget = try? store.nugget(id: move.nuggetID), nugget.isActive == move.isActive else { return nil }
+    func undo(_ move: StateMove) -> String? {
+        guard let nugget = try? store.nugget(id: move.nuggetID), nugget.nuggetState == move.to else { return nil }
         do {
-            if move.isActive {
-                // Back to Inactive, in the place it waited before.
-                try store.setActive(nugget, false)
-                nugget.deactivatedAt = move.previousDeactivatedAt
-                try store.update(nugget, with: NuggetDraft(nugget))
-            } else {
-                // Back into the rotation, then from the end to where it was.
-                guard try store.setActive(nugget, true) == .active else {
-                    return "The rotation filled up, so this nugget can't go back in. Deactivate another to make room."
-                }
-                let ordered = try store.activeNuggets()
-                if let from = ordered.firstIndex(where: { $0.id == nugget.id }) {
-                    let target = min(move.previousIndex, ordered.count - 1)
-                    if from != target {
-                        try store.moveActive(fromOffsets: [from], toOffset: target)
-                    }
-                }
+            if try store.place(nugget, in: move.from, at: move.previousIndex) == .activeFull {
+                return "Active filled up, so this nugget can't go back in. Pause another to make room."
             }
             didChange()
         } catch {
@@ -260,7 +296,7 @@ final class AppModel {
         return nil
     }
 
-    /// Returns true when it was deleted.
+    /// Returns true when it was deleted. An active nugget's spot is left open.
     @discardableResult
     func delete(_ nugget: Nugget) -> Bool {
         do {
@@ -273,13 +309,18 @@ final class AppModel {
         }
     }
 
-    func moveActive(fromOffsets source: IndexSet, toOffset destination: Int) {
+    /// Reorders one section using `List.onMove` offsets.
+    func move(in state: NuggetState, fromOffsets source: IndexSet, toOffset destination: Int) {
         do {
-            try store.moveActive(fromOffsets: source, toOffset: destination)
+            try store.move(in: state, fromOffsets: source, toOffset: destination)
             didChange()
         } catch {
             errorMessage = "Couldn't reorder. \(error.localizedDescription)"
         }
+    }
+
+    func moveActive(fromOffsets source: IndexSet, toOffset destination: Int) {
+        move(in: .active, fromOffsets: source, toOffset: destination)
     }
 
     private func didChange() {
@@ -300,7 +341,7 @@ final class AppModel {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var seen = Set<String>()
         var result: [RecentSource] = []
-        for nugget in (active + inactive).sorted(by: { $0.updatedAt > $1.updatedAt }) {
+        for nugget in all.sorted(by: { $0.updatedAt > $1.updatedAt }) {
             guard nugget.nuggetKind == kind, let from = nugget.book else { continue }
             let key = from.lowercased()
             guard !seen.contains(key) else { continue }

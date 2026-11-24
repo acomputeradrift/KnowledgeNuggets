@@ -13,7 +13,7 @@ Fully on-device: no server, account or running cost. Only network call is an opt
 ## Where things are (all under `ios/`)
 - `project.yml` - XcodeGen spec (bundle prefix, iOS 17, signing team). The `.xcodeproj` is generated; edit project.yml, not Xcode.
 - `KnowledgeNuggets/App/` - app entry, `AppModel` (routes every change through the store, then reschedules), `AppDelegate`, `AppInfo` (version/build), `SampleData`.
-- `Models/` - `Nugget`, `NuggetKind`, `SaveCelebration`.
+- `Models/` - `Nugget` (+ `NuggetState`: active/queued/paused), `NuggetKind`, `NuggetText` (quotes, duplicate matching), `NuggetListLayout` (cross-section drag mapping), `SaveCelebration`.
 - `Store/` - `NuggetStore` protocol (enforces 21-active limit) and `SwiftDataNuggetStore`.
 - `Rotation/RotationEngine.swift` - pure function: today's nugget from active list + days since start.
 - `Notifications/NotificationScheduler.swift` - re-queues next 60 days of local notifications.
@@ -27,11 +27,11 @@ Fully on-device: no server, account or running cost. Only network call is an opt
 ## Build and run
 - `brew install xcodegen`, then `cd ios && xcodegen generate && open KnowledgeNuggets.xcodeproj`. Re-run generate after adding/moving/deleting files.
 - Tests: see `ios/README.md` (xcodebuild, scheme KnowledgeNuggets, iPhone simulator).
-- Debug launch args (`-inMemoryStore`, `-seedSampleData`, `-tab ...`): see `ios/README.md`.
+- Debug launch args (`-inMemoryStore`, `-seedSampleData`, `-seedActiveCount N`, `-tab ...`): see `ios/README.md`.
 - Device install: signing team is set in project.yml. App Store / TestFlight release steps: not documented.
 
 ## Status
-- Live/working: on-device rotation, notifications, add/edit/delete, Active/Inactive lists, export/import, celebration + toasts, Lyrics kind, version shown in Settings (latest commits, 2026-11-13 work).
+- Live/working: on-device rotation, notifications, add/edit/delete, Active/Queued/Paused sections (swipe, drag between sections, state pill in the form), duplicate blocking, curly quotes everywhere, export/import, celebration + toasts, Lyrics kind, version shown in Settings (latest commits, 2026-11-13 work).
 - TODO.md items are all ticked except v2 idea "Search Nuggets" (community sharing; needs a backend, out of scope for v1).
 - Not yet felt on a real phone (per TODO.md): haptics, Reduce Motion, VoiceOver for the celebration.
 - Current branch is `rebuild-local-ios`; the earlier Node/Postgres/Redis version is in git history before it.

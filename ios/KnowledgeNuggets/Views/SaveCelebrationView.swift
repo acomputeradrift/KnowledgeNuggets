@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown in the editor sheet after a new nugget is saved. The check and
 /// headline sit at the top and the buttons at the bottom; between them,
 /// centered, is the progress ring when the nugget joined the rotation, or an
-/// info box when it went to Inactive. It stays until a button is tapped.
+/// info box when it went to Queued or Paused. It stays until a button is tapped.
 struct SaveCelebrationView: View {
     let celebration: SaveCelebration
     let onAddAnother: () -> Void
@@ -142,7 +142,7 @@ struct SaveCelebrationView: View {
     }
 }
 
-/// Why the nugget went to Inactive and how to bring it into the rotation.
+/// Why the nugget isn't in the rotation and how to bring it in.
 struct SaveInfoBox: View {
     let box: SaveCelebration.InfoBox
 
@@ -304,10 +304,14 @@ struct ConfettiPiece {
     SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, outcome: .active), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
 }
 
-#Preview("B: kept inactive, rotation full") {
-    SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, outcome: .keptInactiveLimitReached), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
+#Preview("B: Active full, went to Queued") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 21, outcome: .queuedBecauseActiveFull), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
 }
 
-#Preview("C: switched off") {
-    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, outcome: .inactive), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
+#Preview("C: chose Queued") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, outcome: .chose(.queued)), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
+}
+
+#Preview("C: chose Paused") {
+    SaveCelebrationView(celebration: SaveCelebration(activeCount: 8, outcome: .chose(.paused)), onAddAnother: {}, onGoToNuggets: {}, onDone: {})
 }

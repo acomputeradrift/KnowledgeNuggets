@@ -18,7 +18,8 @@ struct SettingsView: View {
                 backupSection
                 Section("Your Nuggets") {
                     LabeledContent("Active", value: "\(model.active.count) of \(NuggetRules.activeLimit)")
-                    LabeledContent("Inactive", value: "\(model.inactive.count)")
+                    LabeledContent("Queued", value: "\(model.queued.count)")
+                    LabeledContent("Paused", value: "\(model.paused.count)")
                     LabeledContent("Notifications Queued", value: "\(model.scheduledCount)")
                 }
                 aboutSection
@@ -159,7 +160,7 @@ struct SettingsView: View {
     }
 
     /// A clean import confirms with a short toast. Failures, and imports that
-    /// left nuggets out of the full rotation, keep the alert so they can be read.
+    /// sent nuggets to Queued because Active was full, keep the alert so they can be read.
     private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .failure(let error):
@@ -172,7 +173,7 @@ struct SettingsView: View {
                 return
             }
             switch model.importBackupResult(from: data) {
-            case .imported(let summary) where summary.keptInactive == 0 && toasts != nil:
+            case .imported(let summary) where summary.queuedBecauseActiveFull == 0 && toasts != nil:
                 toasts?.show(Self.importToast(summary))
             case let other:
                 importMessage = other.message
@@ -181,8 +182,9 @@ struct SettingsView: View {
     }
 
     static func importToast(_ summary: ImportSummary) -> String {
-        if summary.added == 0 && summary.updated == 0 { return "Backup imported, nothing new" }
-        return "Imported \(summary.added) new, \(summary.updated) updated"
+        let duplicates = summary.duplicatesSkipped > 0 ? ", \(ImportSummary.duplicatesText(summary.duplicatesSkipped))" : ""
+        if summary.added == 0 && summary.updated == 0 { return "Backup imported, nothing new\(duplicates)" }
+        return "Imported \(summary.added) new, \(summary.updated) updated\(duplicates)"
     }
 }
 

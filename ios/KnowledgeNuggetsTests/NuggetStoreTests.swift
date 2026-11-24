@@ -23,58 +23,60 @@ final class NuggetStoreTests: XCTestCase {
 
     @discardableResult
     private func addActive(_ count: Int) throws -> [Nugget] {
-        try (0..<count).map { try store.add(NuggetDraft(text: "Nugget \($0)"), active: true).0 }
+        try (0..<count).map { try store.add(NuggetDraft(text: "Nugget \($0)"), state: .active).0 }
     }
 
     // MARK: 21-nugget limit
 
-    func testTwentyFirstIsActiveTwentySecondIsSavedInactive() throws {
-        let first = try addActive(20)
-        XCTAssertEqual(first.count, 20)
+    func testTwentyFirstIsActiveTwentySecondGoesToTheBottomOfQueued() throws {
+        try addActive(20)
+        try store.add(NuggetDraft(text: "Queued first"), state: .queued)
 
-        let (twentyFirst, outcome21) = try store.add(NuggetDraft(text: "21st"), active: true)
+        let (twentyFirst, outcome21) = try store.add(NuggetDraft(text: "21st"), state: .active)
         XCTAssertEqual(outcome21, .active)
         XCTAssertTrue(twentyFirst.isActive)
 
-        let (twentySecond, outcome22) = try store.add(NuggetDraft(text: "22nd"), active: true)
-        XCTAssertEqual(outcome22, .keptInactiveLimitReached)
-        XCTAssertFalse(twentySecond.isActive)
-        XCTAssertNotNil(outcome22.message)
+        let (twentySecond, outcome22) = try store.add(NuggetDraft(text: "22nd"), state: .active)
+        XCTAssertEqual(outcome22, .queuedBecauseActiveFull)
+        XCTAssertEqual(twentySecond.nuggetState, .queued)
 
         XCTAssertEqual(try store.activeNuggets().count, 21)
-        XCTAssertEqual(try store.inactiveNuggets().map(\.text), ["22nd"])
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Queued first", "22nd"])
     }
 
     func testActivatingPastTheLimitIsRefused() throws {
         let active = try addActive(21)
-        let (extra, _) = try store.add(NuggetDraft(text: "Extra"), active: false)
+        let (extra, _) = try store.add(NuggetDraft(text: "Extra"), state: .paused)
 
-        XCTAssertEqual(try store.setActive(extra, true), .keptInactiveLimitReached)
-        XCTAssertFalse(extra.isActive)
+        XCTAssertEqual(try store.place(extra, in: .active, at: nil), .activeFull)
+        XCTAssertEqual(extra.nuggetState, .paused)
 
         // Make room, then it goes to the end of the rotation.
-        XCTAssertEqual(try store.setActive(active[5], false), .inactive)
-        XCTAssertEqual(try store.setActive(extra, true), .active)
+        XCTAssertEqual(try store.place(active[5], in: .paused, at: nil), .moved)
+        XCTAssertEqual(try store.place(extra, in: .active, at: nil), .moved)
         XCTAssertEqual(try store.activeNuggets().last?.text, "Extra")
         XCTAssertEqual(try store.activeNuggets().count, 21)
     }
 
-    func testActiveLimitReachedNote() {
-        XCTAssertEqual(NuggetRules.activeLimitReachedNote, "21 nuggets are already active. Make one inactive first.")
+    func testEditorNotes() {
+        XCTAssertEqual(NuggetRules.statePickerNote, "Tap to move it. Active needs a free spot.")
+        XCTAssertEqual(NuggetRules.activeLimitReachedNote, "21 nuggets are already active. Pause one to make room.")
     }
 
-    func testInactiveNuggetsAreUnlimited() throws {
+    func testQueuedAndPausedAreUnlimited() throws {
         try addActive(21)
         for index in 0..<30 {
-            try store.add(NuggetDraft(text: "Inactive \(index)"), active: false)
+            try store.add(NuggetDraft(text: "Queued \(index)"), state: .queued)
+            try store.add(NuggetDraft(text: "Paused \(index)"), state: .paused)
         }
-        XCTAssertEqual(try store.inactiveNuggets().count, 30)
+        XCTAssertEqual(try store.nuggets(in: .queued).count, 30)
+        XCTAssertEqual(try store.nuggets(in: .paused).count, 30)
     }
 
     // MARK: Editing and ordering
 
     func testAddTrimsAndBlanksBecomeNil() throws {
-        let (nugget, _) = try store.add(NuggetDraft(text: "  Hello \n", author: "  ", book: " Book ", category: ""), active: true)
+        let (nugget, _) = try store.add(NuggetDraft(text: "  Hello \n", author: "  ", book: " Book ", category: ""), state: .active)
         XCTAssertEqual(nugget.text, "Hello")
         XCTAssertNil(nugget.author)
         XCTAssertEqual(nugget.book, "Book")
@@ -86,14 +88,6 @@ final class NuggetStoreTests: XCTestCase {
         XCTAssertTrue(NuggetDraft(text: "x").isValid)
     }
 
-    func testMoveActiveReordersAndRenumbers() throws {
-        try addActive(4)
-        try store.moveActive(fromOffsets: IndexSet(integer: 3), toOffset: 0)
-        let active = try store.activeNuggets()
-        XCTAssertEqual(active.map(\.text), ["Nugget 3", "Nugget 0", "Nugget 1", "Nugget 2"])
-        XCTAssertEqual(active.map(\.sortOrder), [0, 1, 2, 3])
-    }
-
     func testDeleteMidCycleKeepsOrderOfTheRest() throws {
         let nuggets = try addActive(5)
         try store.delete(nuggets[2])
@@ -101,7 +95,7 @@ final class NuggetStoreTests: XCTestCase {
     }
 
     func testFillMetadataOnlyFillsBlanks() throws {
-        let (nugget, _) = try store.add(NuggetDraft(text: "x", book: "Dune"), active: true)
+        let (nugget, _) = try store.add(NuggetDraft(text: "x", book: "Dune"), state: .active)
         XCTAssertTrue(try store.fillMetadata(id: nugget.id, author: "Frank Herbert", book: "Other"))
         XCTAssertEqual(nugget.author, "Frank Herbert")
         XCTAssertEqual(nugget.book, "Dune")
@@ -109,143 +103,194 @@ final class NuggetStoreTests: XCTestCase {
         XCTAssertEqual(nugget.author, "Frank Herbert")
     }
 
-    // MARK: Inactive order
+    // MARK: Sections
 
-    /// 21 active, then: two waiting for a spot, one added with the switch off,
-    /// one more waiting, and finally the oldest active nugget moved out. That
-    /// leaves a free spot that nothing fills on its own.
+    /// 21 active, then: two queued because Active was full, one added as
+    /// paused, one more queued, and finally the first active nugget paused.
+    /// That leaves a free spot that nothing fills on its own.
     @discardableResult
-    private func mixedInactive() throws -> [Nugget] {
+    private func mixedSections() throws -> [Nugget] {
         let active = try addActive(21)
-        try store.add(NuggetDraft(text: "Wait A"), active: true)
-        try store.add(NuggetDraft(text: "Wait B"), active: true)
-        try store.add(NuggetDraft(text: "Off X"), active: false)
-        try store.add(NuggetDraft(text: "Wait C"), active: true)
-        try store.setActive(active[0], false)
+        try store.add(NuggetDraft(text: "Wait A"), state: .active)
+        try store.add(NuggetDraft(text: "Wait B"), state: .active)
+        try store.add(NuggetDraft(text: "Off X"), state: .paused)
+        try store.add(NuggetDraft(text: "Wait C"), state: .active)
+        try store.place(active[0], in: .paused, at: nil)
         return active
     }
 
-    func testInactiveListsWaitingOldestFirstThenMovedOutMostRecentLast() throws {
-        try mixedInactive()
-        let inactive = try store.inactiveNuggets()
-        XCTAssertEqual(inactive.map(\.text), ["Wait A", "Wait B", "Wait C", "Off X", "Nugget 0"])
-        XCTAssertEqual(inactive.map { $0.deactivatedAt == nil }, [true, true, true, false, false])
+    func testSectionsKeepTheirOrderAndPausingGoesToTheBottom() throws {
+        let active = try mixedSections()
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Wait A", "Wait B", "Wait C"])
+        XCTAssertEqual(try store.nuggets(in: .paused).map(\.text), ["Off X", "Nugget 0"])
+        try store.place(active[1], in: .paused, at: nil)
+        XCTAssertEqual(try store.nuggets(in: .paused).last?.text, "Nugget 1")
+        XCTAssertEqual(try store.nuggets(in: .paused).map(\.sortOrder), [0, 1, 2])
     }
 
-    func testEditingDoesNotMoveAnInactiveNugget() throws {
-        try mixedInactive()
-        let before = try store.inactiveNuggets()
-        try store.update(before[0], with: NuggetDraft(text: "Wait A edited"))
-        try store.update(before[3], with: NuggetDraft(text: "Off X edited"))
-        XCTAssertTrue(try store.fillMetadata(id: before[1].id, author: "Someone", book: nil))
-        XCTAssertEqual(
-            try store.inactiveNuggets().map(\.text),
-            ["Wait A edited", "Wait B", "Wait C", "Off X edited", "Nugget 0"]
-        )
+    func testEditingDoesNotMoveANugget() throws {
+        try mixedSections()
+        let queued = try store.nuggets(in: .queued)
+        let paused = try store.nuggets(in: .paused)
+        try store.update(queued[0], with: NuggetDraft(text: "Wait A edited"))
+        try store.update(paused[0], with: NuggetDraft(text: "Off X edited"))
+        XCTAssertTrue(try store.fillMetadata(id: queued[1].id, author: "Someone", book: nil))
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Wait A edited", "Wait B", "Wait C"])
+        XCTAssertEqual(try store.nuggets(in: .paused).map(\.text), ["Off X edited", "Nugget 0"])
     }
 
-    func testMovingOutAgainGoesToTheBottom() throws {
-        let active = try mixedInactive()
-        try store.setActive(active[1], false)
-        XCTAssertEqual(try store.inactiveNuggets().last?.text, "Nugget 1")
+    func testPlacingAtAPositionAndReordering() throws {
+        try mixedSections()
+        let paused = try store.nuggets(in: .paused)
+        XCTAssertEqual(try store.place(paused[1], in: .queued, at: 1), .moved)
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Wait A", "Nugget 0", "Wait B", "Wait C"])
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.sortOrder), [0, 1, 2, 3])
+        XCTAssertEqual(try store.place(paused[1], in: .queued, at: 1), .unchanged)
+        XCTAssertEqual(try store.place(paused[1], in: .queued, at: 99), .reordered, "Clamped to the bottom")
+        XCTAssertEqual(try store.nuggets(in: .queued).last?.text, "Nugget 0")
     }
 
-    func testReactivatingClearsDeactivatedAtAndAppendsToActive() throws {
-        let nuggets = try addActive(3)
-        try store.setActive(nuggets[0], false)
-        XCTAssertNotNil(nuggets[0].deactivatedAt)
-
-        XCTAssertEqual(try store.setActive(nuggets[0], true), .active)
-        XCTAssertNil(nuggets[0].deactivatedAt)
-        XCTAssertEqual(try store.activeNuggets().map(\.text), ["Nugget 1", "Nugget 2", "Nugget 0"])
+    func testMoveActiveReordersAndRenumbers() throws {
+        try addActive(4)
+        try store.move(in: .active, fromOffsets: IndexSet(integer: 3), toOffset: 0)
+        XCTAssertEqual(try store.activeNuggets().map(\.text), ["Nugget 3", "Nugget 0", "Nugget 1", "Nugget 2"])
+        try store.move(in: .active, fromOffsets: IndexSet(integer: 0), toOffset: 4)
+        let active = try store.activeNuggets()
+        XCTAssertEqual(active.map(\.text), ["Nugget 0", "Nugget 1", "Nugget 2", "Nugget 3"])
+        XCTAssertEqual(active.map(\.sortOrder), [0, 1, 2, 3])
     }
 
-    func testAddingWithTheSwitchOffGoesToTheBottomOfInactive() throws {
-        try mixedInactive()
-        let (added, outcome) = try store.add(NuggetDraft(text: "Off Y"), active: false)
-        XCTAssertEqual(outcome, .inactive)
-        XCTAssertNotNil(added.deactivatedAt)
-        XCTAssertEqual(try store.inactiveNuggets().last?.text, "Off Y")
-    }
-
-    func testNothingIsPromotedWhenNuggetsAreDeactivatedOrDeleted() throws {
-        let active = try mixedInactive()
+    func testNothingIsPromotedWhenNuggetsArePausedOrDeleted() throws {
+        let active = try mixedSections()
         XCTAssertEqual(try store.activeNuggets().count, 20)
-
-        try store.setActive(active[1], false)
+        try store.place(active[1], in: .paused, at: nil)
         try store.delete(active[2])
         XCTAssertEqual(try store.activeNuggets().count, 18)
-        let inactive = try store.inactiveNuggets()
-        XCTAssertEqual(inactive.count, 6)
-        XCTAssertEqual(inactive.prefix(3).map(\.text), ["Wait A", "Wait B", "Wait C"])
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Wait A", "Wait B", "Wait C"])
     }
 
-    func testBackupRoundTripsDeactivatedAt() throws {
-        try mixedInactive()
-        let data = try store.exportBackup().encoded()
-        let movedOut = try store.inactiveNuggets().filter { $0.deactivatedAt != nil }
-        XCTAssertEqual(movedOut.count, 2)
+    func testLegacyNuggetsReadTheirStateBeforeTheMigrationRuns() {
+        let nugget = Nugget(text: "x")
+        nugget.state = ""
+        nugget.legacyIsActive = false
+        XCTAssertEqual(nugget.nuggetState, .queued)
+        nugget.legacyDeactivatedAt = .now
+        XCTAssertEqual(nugget.nuggetState, .paused)
+        nugget.legacyIsActive = true
+        XCTAssertEqual(nugget.nuggetState, .active)
+        nugget.nuggetState = .queued
+        XCTAssertEqual(nugget.state, "queued")
+    }
+
+    // MARK: Backup states
+
+    func testBackupRoundTripsStatesAndOrder() throws {
+        try mixedSections()
+        try store.move(in: .queued, fromOffsets: [2], toOffset: 0)
+        let backup = try store.exportBackup()
+        XCTAssertEqual(backup.version, 2)
+        let data = try backup.encoded()
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(json.contains("\"state\" : \"paused\""))
 
         let otherContainer = try SwiftDataNuggetStore.makeContainer(inMemory: true)
         let other = SwiftDataNuggetStore(context: otherContainer.mainContext)
         let summary = try other.importBackup(NuggetBackup.decode(data))
         XCTAssertEqual(summary.added, 25)
-        XCTAssertEqual(summary.keptInactive, 0)
-        for original in movedOut {
-            XCTAssertEqual(try other.nugget(id: original.id)?.deactivatedAt, original.deactivatedAt)
+        XCTAssertEqual(summary.queuedBecauseActiveFull, 0)
+        for state in NuggetState.allCases {
+            XCTAssertEqual(try other.nuggets(in: state).map(\.text), try store.nuggets(in: state).map(\.text), state.rawValue)
         }
-        XCTAssertEqual(try other.inactiveNuggets().map(\.text), try store.inactiveNuggets().map(\.text))
     }
 
-    func testOldBackupWithoutDeactivatedAtStillLoads() throws {
+    func testOldBackupsMapIsActiveAndDeactivatedAt() throws {
         let json = """
         {"version":1,"exportedAt":"2026-01-01T08:00:00Z","nuggets":[
-          {"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","text":"Old inactive","isActive":false,"sortOrder":0,
+          {"id":"1F9619FF-8B86-D011-B42D-00C04FC964FF","text":"Moved out later","isActive":false,"sortOrder":0,
+           "createdAt":"2026-01-01T08:00:00Z","updatedAt":"2026-01-01T08:00:00Z","deactivatedAt":"2026-01-03T08:00:00Z"},
+          {"id":"2F9619FF-8B86-D011-B42D-00C04FC964FF","text":"Waiting newer","isActive":false,"sortOrder":0,
+           "createdAt":"2026-01-02T08:00:00Z","updatedAt":"2026-01-02T08:00:00Z"},
+          {"id":"3F9619FF-8B86-D011-B42D-00C04FC964FF","text":"\\"Old active\\"","isActive":true,"sortOrder":0,
            "createdAt":"2026-01-01T08:00:00Z","updatedAt":"2026-01-01T08:00:00Z"},
-          {"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","text":"Old active","isActive":true,"sortOrder":0,
-           "createdAt":"2026-01-01T08:00:00Z","updatedAt":"2026-01-01T08:00:00Z"}]}
+          {"id":"4F9619FF-8B86-D011-B42D-00C04FC964FF","text":"Moved out first","isActive":false,"sortOrder":0,
+           "createdAt":"2026-01-01T09:00:00Z","updatedAt":"2026-01-01T09:00:00Z","deactivatedAt":"2026-01-02T08:00:00Z"},
+          {"id":"5F9619FF-8B86-D011-B42D-00C04FC964FF","text":"Waiting older","isActive":false,"sortOrder":0,
+           "createdAt":"2026-01-01T07:00:00Z","updatedAt":"2026-01-01T07:00:00Z"}]}
         """
         let backup = try NuggetBackup.decode(Data(json.utf8))
-        XCTAssertNil(backup.nuggets[0].deactivatedAt)
+        XCTAssertNil(backup.nuggets[0].state)
+        XCTAssertEqual(backup.nuggets.map(\.resolvedState), [.paused, .queued, .active, .paused, .queued])
         let summary = try store.importBackup(backup)
-        XCTAssertEqual(summary.added, 2)
-        XCTAssertEqual(try store.activeNuggets().map(\.text), ["Old active"])
-        let inactive = try store.inactiveNuggets()
-        XCTAssertEqual(inactive.map(\.text), ["Old inactive"])
-        XCTAssertNil(inactive[0].deactivatedAt, "Unknown, so it waits for a spot")
+        XCTAssertEqual(summary.added, 5)
+        XCTAssertEqual(try store.activeNuggets().map(\.text), ["Old active"], "Wrapping quotes stripped")
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Waiting older", "Waiting newer"])
+        XCTAssertEqual(try store.nuggets(in: .paused).map(\.text), ["Moved out first", "Moved out later"])
     }
 
-    func testImportKeepsMergeRulesForDeactivatedAt() throws {
+    func testImportKeepsMergeRulesForStates() throws {
         let nuggets = try addActive(2)
-        try store.setActive(nuggets[0], false)
-        let local = try XCTUnwrap(nuggets[0].deactivatedAt)
+        try store.place(nuggets[0], in: .paused, at: nil)
 
-        // A newer copy without the field (an older backup) keeps what this device knows.
+        // A newer copy from an older backup that only says "inactive" keeps what this device knows.
         var item = NuggetBackup.Item(nuggets[0])
         item.text = "Newer"
         item.updatedAt = nuggets[0].updatedAt.addingTimeInterval(60)
+        item.state = nil
+        item.isActive = false
         item.deactivatedAt = nil
         XCTAssertEqual(try store.importBackup(NuggetBackup(exportedAt: .now, nuggets: [item])).updated, 1)
         XCTAssertEqual(nuggets[0].text, "Newer")
-        XCTAssertEqual(nuggets[0].deactivatedAt, local)
+        XCTAssertEqual(nuggets[0].nuggetState, .paused)
 
-        // A newer copy that's active brings it back and clears the date.
-        item.isActive = true
+        // A newer copy that's active brings it back to the end of the rotation.
+        item.state = "active"
         item.updatedAt = item.updatedAt.addingTimeInterval(60)
         try store.importBackup(NuggetBackup(exportedAt: .now, nuggets: [item]))
         XCTAssertTrue(nuggets[0].isActive)
-        XCTAssertNil(nuggets[0].deactivatedAt)
         XCTAssertEqual(try store.activeNuggets().last?.id, nuggets[0].id)
+
+        // A newer copy that's queued moves it to the bottom of Queued.
+        item.state = "queued"
+        item.updatedAt = item.updatedAt.addingTimeInterval(60)
+        try store.importBackup(NuggetBackup(exportedAt: .now, nuggets: [item]))
+        XCTAssertEqual(nuggets[0].nuggetState, .queued)
 
         // An older copy changes nothing.
         let stale = NuggetBackup.Item(
-            id: nuggets[1].id, text: "Stale", author: nil, book: nil, category: nil,
-            isActive: false, sortOrder: 0, createdAt: nuggets[1].createdAt,
-            updatedAt: nuggets[1].updatedAt.addingTimeInterval(-60), deactivatedAt: .now
+            id: nuggets[1].id, text: "Stale", state: .paused, createdAt: nuggets[1].createdAt,
+            updatedAt: nuggets[1].updatedAt.addingTimeInterval(-60)
         )
         XCTAssertEqual(try store.importBackup(NuggetBackup(exportedAt: .now, nuggets: [stale])).unchanged, 1)
         XCTAssertTrue(nuggets[1].isActive)
-        XCTAssertNil(nuggets[1].deactivatedAt)
+    }
+
+    // MARK: Import duplicates
+
+    func testImportSkipsDuplicatesOfADifferentNugget() throws {
+        let (local, _) = try store.add(NuggetDraft(text: "Slow is smooth."), state: .active)
+        let items = [
+            NuggetBackup.Item(id: UUID(), text: "“slow is SMOOTH”", state: .queued, createdAt: .now, updatedAt: .now),
+            NuggetBackup.Item(id: UUID(), text: "Fresh", state: .queued, createdAt: .now, updatedAt: .now),
+            NuggetBackup.Item(id: UUID(), text: "fresh!", state: .paused, createdAt: .now, updatedAt: .now),
+            // The same nugget, newer: not a duplicate of itself.
+            NuggetBackup.Item(id: local.id, text: "Slow is smooth!", state: .active, createdAt: local.createdAt,
+                              updatedAt: local.updatedAt.addingTimeInterval(60)),
+        ]
+        let summary = try store.importBackup(NuggetBackup(exportedAt: .now, nuggets: items))
+        XCTAssertEqual(summary.added, 1)
+        XCTAssertEqual(summary.updated, 1)
+        XCTAssertEqual(summary.duplicatesSkipped, 2)
+        XCTAssertEqual(summary.message, "Added 1, updated 1, unchanged 0. 2 duplicates skipped.")
+        XCTAssertEqual(local.text, "Slow is smooth!")
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Fresh"])
+        XCTAssertTrue(try store.nuggets(in: .paused).isEmpty)
+    }
+
+    func testDuplicateLookupIgnoresTheExcludedNugget() throws {
+        let (nugget, _) = try store.add(NuggetDraft(text: "Hello there."), state: .paused)
+        XCTAssertEqual(try store.duplicate(of: "hello THERE", excluding: nil)?.id, nugget.id)
+        XCTAssertNil(try store.duplicate(of: "hello THERE", excluding: nugget.id))
+        XCTAssertNil(try store.duplicate(of: "  ", excluding: nil))
     }
 
     // MARK: Backup
@@ -267,37 +312,37 @@ final class NuggetStoreTests: XCTestCase {
     }
 
     func testImportAddsNewAndReplacesOlder() throws {
-        let (existing, _) = try store.add(NuggetDraft(text: "Old text"), active: true)
+        let (existing, _) = try store.add(NuggetDraft(text: "Old text"), state: .active)
         let newer = NuggetBackup.Item(
-            id: existing.id, text: "New text", author: "A", book: nil, category: nil,
-            isActive: true, sortOrder: 0, createdAt: existing.createdAt,
+            id: existing.id, text: "New text", author: "A", state: .active, createdAt: existing.createdAt,
             updatedAt: existing.updatedAt.addingTimeInterval(60)
         )
         let fresh = NuggetBackup.Item(
-            id: UUID(), text: "Brand new", author: nil, book: "B", category: "C",
-            isActive: false, sortOrder: 0, createdAt: .now, updatedAt: .now
+            id: UUID(), text: "Brand new", book: "B", category: "C", state: .queued, createdAt: .now, updatedAt: .now
         )
         let summary = try store.importBackup(NuggetBackup(exportedAt: .now, nuggets: [newer, fresh]))
         XCTAssertEqual(summary.added, 1)
         XCTAssertEqual(summary.updated, 1)
         XCTAssertEqual(existing.text, "New text")
         XCTAssertEqual(existing.author, "A")
-        XCTAssertEqual(try store.inactiveNuggets().map(\.text), ["Brand new"])
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Brand new"])
     }
 
-    func testImportRespectsTheActiveLimit() throws {
+    func testImportPastTheActiveLimitGoesToTheBottomOfQueued() throws {
         try addActive(20)
+        try store.add(NuggetDraft(text: "Already queued"), state: .queued)
         let items = (0..<3).map { index in
             NuggetBackup.Item(
-                id: UUID(), text: "Imported \(index)", author: nil, book: nil, category: nil,
-                isActive: true, sortOrder: index, createdAt: .now, updatedAt: .now
+                id: UUID(), text: "Imported \(index)", state: .active, sortOrder: index, createdAt: .now, updatedAt: .now
             )
         }
         let summary = try store.importBackup(NuggetBackup(exportedAt: .now, nuggets: items))
         XCTAssertEqual(summary.added, 3)
-        XCTAssertEqual(summary.keptInactive, 2)
+        XCTAssertEqual(summary.queuedBecauseActiveFull, 2)
+        XCTAssertEqual(summary.message, "Added 3, updated 0, unchanged 0. 2 went to Queued because 21 nuggets are already active.")
         XCTAssertEqual(try store.activeNuggets().count, 21)
         XCTAssertEqual(try store.activeNuggets().last?.text, "Imported 0")
+        XCTAssertEqual(try store.nuggets(in: .queued).map(\.text), ["Already queued", "Imported 1", "Imported 2"])
     }
 
     func testDecodeAcceptsBareArrayAndFractionalDates() throws {

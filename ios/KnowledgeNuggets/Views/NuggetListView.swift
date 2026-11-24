@@ -38,7 +38,7 @@ struct NuggetListView: View {
             }
             .navigationTitle("Nuggets")
             .toolbar {
-                if model.active.count > 1 {
+                if model.all.count > 1 {
                     ToolbarItem(placement: .topBarLeading) {
                         EditButton()
                     }
@@ -86,39 +86,59 @@ struct NuggetListView: View {
         }
     }
 
-    private var list: some View {
-        List {
-            Section {
-                if model.active.isEmpty {
-                    Text("No active nuggets. Swipe right on an inactive one to add it to the rotation.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(model.active, id: \.activeRowID) { nugget in
-                        row(for: nugget)
-                    }
-                    .onMove { source, destination in
-                        model.moveActive(fromOffsets: source, toOffset: destination)
-                    }
-                }
-            } header: {
-                Text("Active")
-            } footer: {
-                Text("\(model.active.count) of \(NuggetRules.activeLimit) in the daily rotation, shown in the order they arrive. Touch and hold to reorder.")
-            }
+    private var layout: NuggetListLayout {
+        NuggetListLayout(
+            active: model.active.map(\.id),
+            queued: model.queued.map(\.id),
+            paused: model.paused.map(\.id)
+        )
+    }
 
-            if !model.inactive.isEmpty {
-                Section("Inactive") {
-                    ForEach(model.inactive, id: \.inactiveRowID) { nugget in
-                        row(for: nugget)
+    /// One `ForEach` over every row, so `onMove` can carry a nugget from any
+    /// section to any other (it never leaves its `ForEach`, and its reorder
+    /// drag never reaches another section's drop handler). Header rows can't
+    /// be moved. Nugget rows keep the system background, so swipes look as
+    /// they always have.
+    private var list: some View {
+        let layout = self.layout
+        let byID = Dictionary(model.all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return List {
+            Section {
+                ForEach(layout.rows) { item in
+                    switch item {
+                    case .header(let state):
+                        SectionHeaderRow(state: state, activeCount: model.active.count)
+                            .moveDisabled(true)
+                    case .placeholder(let state):
+                        Text(Self.emptyText(for: state))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .moveDisabled(true)
+                    case .nugget(let id, _):
+                        if let nugget = byID[id] {
+                            nuggetRow(for: nugget)
+                        }
                     }
                 }
+                .onMove { source, destination in
+                    drop(source, at: destination, in: layout)
+                }
+            } footer: {
+                Text("Touch and hold a nugget to reorder it, or drag it to another section.")
             }
         }
         .listStyle(.insetGrouped)
     }
 
-    private func row(for nugget: Nugget) -> some View {
+    static func emptyText(for state: NuggetState) -> String {
+        switch state {
+        case .active: return "No active nuggets. Swipe one below to Activate, or drag it here."
+        case .queued: return "Nothing queued. New nuggets wait here when Active is full."
+        case .paused: return "Nothing paused. Swipe an active nugget to Pause it."
+        }
+    }
+
+    private func nuggetRow(for nugget: Nugget) -> some View {
         Button {
             editor = .edit(nugget)
         } label: {
@@ -128,14 +148,14 @@ struct NuggetListView: View {
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             if nugget.isActive {
                 Button {
-                    moveAfterSwipeCloses(nugget, toActive: false)
+                    moveAfterSwipeCloses(nugget, to: .paused)
                 } label: {
-                    Label("Deactivate", systemImage: "pause.circle")
+                    Label("Pause", systemImage: "pause.circle")
                 }
                 .tint(.gray)
             } else {
                 Button {
-                    moveAfterSwipeCloses(nugget, toActive: true)
+                    moveAfterSwipeCloses(nugget, to: .active)
                 } label: {
                     Label("Activate", systemImage: "play.circle")
                 }
@@ -151,8 +171,8 @@ struct NuggetListView: View {
             }
             .tint(.red)
         }
-        .accessibilityAction(named: nugget.isActive ? "Deactivate" : "Activate") {
-            move(nugget, toActive: !nugget.isActive)
+        .accessibilityAction(named: nugget.isActive ? "Pause" : "Activate") {
+            move(nugget, to: nugget.isActive ? .paused : .active)
         }
         .accessibilityAction(named: "Delete") {
             pendingDelete = nugget
@@ -160,58 +180,87 @@ struct NuggetListView: View {
     }
 }
 
-// MARK: Moving between Active and Inactive
-
-private extension Nugget {
-    /// Row ids that differ by section, so a move between sections is a plain
-    /// remove here and insert there rather than a cross-section move.
-    var activeRowID: String { "active-\(id.uuidString)" }
-    var inactiveRowID: String { "inactive-\(id.uuidString)" }
-}
+// MARK: Moving between sections
 
 extension NuggetListView {
     /// About how long a swipe action takes to slide closed. Moving the row while
     /// it's still sliding back makes it shrink away half-open; waiting lets the
-    /// swipe finish, then the row leaves in one animation. (The row ids above
-    /// stop the other glitch: the row flying up off the top and back.)
+    /// swipe finish, then the row moves in one animation.
     static let swipeCloseDelay: Duration = .milliseconds(300)
 
-    private func moveAfterSwipeCloses(_ nugget: Nugget, toActive isActive: Bool) {
+    private func moveAfterSwipeCloses(_ nugget: Nugget, to state: NuggetState) {
         Task { @MainActor in
             try? await Task.sleep(for: Self.swipeCloseDelay)
-            move(nugget, toActive: isActive)
+            move(nugget, to: state)
         }
     }
 
-    /// Moves the nugget with one animation and confirms it, or explains why the
-    /// rotation can't take it. Used by the swipe and accessibility actions.
-    private func move(_ nugget: Nugget, toActive isActive: Bool) {
-        let result = withAnimation(.snappy) { model.move(nugget, toActive: isActive) }
+    /// A drag ended: map the flat drop offset back to a section and position.
+    /// The row is already where it was dropped, so this doesn't animate; a
+    /// refused drop puts it back and explains why.
+    private func drop(_ source: IndexSet, at destination: Int, in layout: NuggetListLayout) {
+        guard let from = source.first,
+              let target = layout.destination(movingRowAt: from, toOffset: destination),
+              case .nugget(let id, _) = layout.rows[from],
+              let nugget = model.nugget(id: id) else { return }
+        move(nugget, to: target.state, at: target.index, animated: false)
+    }
+
+    /// Moves the nugget and confirms a change of section with Undo, or explains
+    /// why Active can't take it. Reordering within a section isn't confirmed.
+    /// Used by the swipe, drag and accessibility actions.
+    private func move(_ nugget: Nugget, to state: NuggetState, at index: Int? = nil, animated: Bool = true) {
+        let result = withAnimation(animated ? .snappy : nil) { model.move(nugget, to: state, at: index) }
         switch result {
         case .moved(let move):
-            toasts?.show(move.message, successHaptic: move.isActive) { [model] in
+            toasts?.show(move.message, successHaptic: move.entersActive) { [model] in
                 Self.undo(move, model: model, onRefused: { limitMessage = $0 })
             }
-        case .rotationFull(let message):
+        case .activeFull(let message):
             limitMessage = message
-        case .unchanged, .failed:
+        case .reordered, .unchanged, .failed:
             break
         }
     }
 
     /// Undo for a move, wherever it was made (the list or the editor).
     @MainActor
-    static func undo(_ move: AppModel.ActiveMove, model: AppModel, onRefused: (String) -> Void) {
+    static func undo(_ move: AppModel.StateMove, model: AppModel, onRefused: (String) -> Void) {
         if let message = withAnimation(.snappy, { model.undo(move) }) {
             onRefused(message)
         }
     }
-    /// Short single-line preview of a nugget's text for the delete alert.
+
+    /// Short single-line preview of a nugget's text for the delete alert, in quotes.
     static func deletePreview(_ text: String, limit: Int = 80) -> String {
-        let flat = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let flat = NuggetText.stored(text).split(whereSeparator: \.isNewline).joined(separator: " ")
             .trimmingCharacters(in: .whitespaces)
-        guard flat.count > limit else { return flat }
-        return String(flat.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…"
+        guard flat.count > limit else { return NuggetText.quoted(flat) }
+        return NuggetText.quoted(String(flat.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…")
+    }
+}
+
+/// A row that reads as a section header: "Active  8 of 21", "Queued", "Paused".
+private struct SectionHeaderRow: View {
+    let state: NuggetState
+    let activeCount: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(state.title)
+            Spacer()
+            if state == .active {
+                Text("\(activeCount) of \(NuggetRules.activeLimit)")
+                    .monospacedDigit()
+            }
+        }
+        .font(.headline)
+        .foregroundStyle(.secondary)
+        .listRowBackground(Color(.systemGroupedBackground))
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 22, leading: 16, bottom: 6, trailing: 16))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -220,7 +269,7 @@ struct NuggetRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(nugget.text)
+            Text(nugget.quotedText)
                 .font(.body)
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)

@@ -20,10 +20,12 @@ struct KnowledgeNuggetsApp: App {
         }
         self.container = container
         let store = SwiftDataNuggetStore(context: container.mainContext)
-        if launch.seedSampleData {
-            SampleData.seed(into: store)
-        } else if let count = launch.seedActiveCount {
+        if let count = launch.seedActiveCount {
             SampleData.seed(into: store, activeCount: count)
+            // With -seedSampleData too, add the queued and paused samples.
+            if launch.seedSampleData { SampleData.seedSetAside(into: store) }
+        } else if launch.seedSampleData {
+            SampleData.seed(into: store)
         }
         let model = AppModel(
             store: store,
@@ -69,7 +71,8 @@ struct LaunchOptions {
     var inMemoryStore = false
     var seedSampleData = false
     /// `-seedActiveCount N`: N active nuggets and nothing else, for checking the
-    /// add-nugget celebration at each milestone.
+    /// add-nugget celebration at each milestone. With `-seedSampleData` too,
+    /// the queued and paused samples are added as well.
     var seedActiveCount: Int?
     var initialTab: AppTab = .today
 

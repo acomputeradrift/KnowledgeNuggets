@@ -16,7 +16,7 @@ struct PlannedNotification: Equatable, Sendable {
     /// text (the app name when there's no title), so the attribution goes there
     /// and the quote keeps every line of the body. Empty for affirmations.
     var title: String
-    /// The quote alone.
+    /// The quote alone, in curly quotes like everywhere else in the app.
     var body: String
 }
 
@@ -119,7 +119,7 @@ final class NotificationScheduler: @unchecked Sendable {
                     fireDate: fireDate,
                     dateComponents: components,
                     title: nugget.attribution ?? "",
-                    body: nugget.text
+                    body: NuggetText.quoted(nugget.text)
                 )
             )
         }

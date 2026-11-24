@@ -32,32 +32,21 @@ final class SwiftDataNuggetStore: NuggetStore {
 
     // MARK: Reading
 
-    func activeNuggets() throws -> [Nugget] {
-        let descriptor = FetchDescriptor<Nugget>(
-            predicate: #Predicate { $0.isActive },
-            sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.createdAt)]
-        )
-        return try context.fetch(descriptor)
+    private func allNuggets() throws -> [Nugget] {
+        try context.fetch(FetchDescriptor<Nugget>())
     }
 
-    /// Inactive nuggets in a stable order that editing never changes: first the
-    /// ones waiting for a spot (never moved out on purpose), oldest first, then
-    /// the ones moved out on purpose, so the most recently moved out is last.
-    /// Sorted here because a SortDescriptor can't put nil dates first.
-    func inactiveNuggets() throws -> [Nugget] {
-        let descriptor = FetchDescriptor<Nugget>(predicate: #Predicate { !$0.isActive })
-        return try context.fetch(descriptor).sorted(by: Self.inactiveOrder)
+    /// One section in the user's order. Filtered and sorted here rather than in
+    /// a predicate: the list is small, and nuggets not yet migrated read their
+    /// section from the legacy fields.
+    func nuggets(in state: NuggetState) throws -> [Nugget] {
+        try allNuggets().filter { $0.nuggetState == state }.sorted(by: Self.sectionOrder)
     }
 
-    static func inactiveOrder(_ lhs: Nugget, _ rhs: Nugget) -> Bool {
-        switch (lhs.deactivatedAt, rhs.deactivatedAt) {
-        case (nil, .some): return true
-        case (.some, nil): return false
-        case let (.some(left), .some(right)) where left != right: return left < right
-        default:
-            if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
+    static func sectionOrder(_ lhs: Nugget, _ rhs: Nugget) -> Bool {
+        if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     func nugget(id: UUID) throws -> Nugget? {
@@ -66,43 +55,56 @@ final class SwiftDataNuggetStore: NuggetStore {
         return try context.fetch(descriptor).first
     }
 
-    private func activeCount() throws -> Int {
-        try context.fetchCount(FetchDescriptor<Nugget>(predicate: #Predicate { $0.isActive }))
+    func duplicate(of text: String, excluding id: UUID?) throws -> Nugget? {
+        let key = NuggetText.matchKey(text)
+        guard !key.isEmpty else { return nil }
+        return try allNuggets()
+            .sorted(by: Self.sectionOrder)
+            .first { $0.id != id && NuggetText.matchKey($0.text) == key }
     }
 
-    private func nextSortOrder() throws -> Int {
-        (try activeNuggets().map(\.sortOrder).max() ?? -1) + 1
+    private func activeCount() throws -> Int {
+        try nuggets(in: .active).count
+    }
+
+    /// Numbers a section 0, 1, 2… in the given order.
+    private static func renumber(_ ordered: [Nugget]) {
+        for (index, nugget) in ordered.enumerated() where nugget.sortOrder != index {
+            nugget.sortOrder = index
+        }
     }
 
     // MARK: Writing
 
     @discardableResult
-    func add(_ draft: NuggetDraft, active: Bool = true) throws -> (Nugget, ActivationOutcome) {
+    func add(_ draft: NuggetDraft, state: NuggetState = .active) throws -> (Nugget, ActivationOutcome) {
         let timestamp = now()
-        let room = try activeCount() < NuggetRules.activeLimit
-        let makeActive = active && room
+        let full = try activeCount() >= NuggetRules.activeLimit
+        let outcome: ActivationOutcome
+        switch state {
+        case .active: outcome = full ? .queuedBecauseActiveFull : .active
+        case .queued, .paused: outcome = .chose(state)
+        }
+        let section = try nuggets(in: outcome.state)
         let nugget = Nugget(
-            text: draft.trimmedText,
+            text: draft.storedText,
             author: draft.storedAuthor,
             book: draft.storedBook,
             category: NuggetDraft.clean(draft.category),
             kind: draft.kind,
-            isActive: makeActive,
-            sortOrder: makeActive ? try nextSortOrder() : 0,
+            state: outcome.state,
+            // The bottom of its section.
+            sortOrder: (section.map(\.sortOrder).max() ?? -1) + 1,
             createdAt: timestamp,
-            updatedAt: timestamp,
-            // Only a deliberate "not in rotation" counts as moved out. One kept
-            // inactive because the rotation is full waits for a spot instead.
-            deactivatedAt: active ? nil : timestamp
+            updatedAt: timestamp
         )
         context.insert(nugget)
         try context.save()
-        let outcome: ActivationOutcome = makeActive ? .active : (active ? .keptInactiveLimitReached : .inactive)
         return (nugget, outcome)
     }
 
     func update(_ nugget: Nugget, with draft: NuggetDraft) throws {
-        nugget.text = draft.trimmedText
+        nugget.text = draft.storedText
         nugget.author = draft.storedAuthor
         nugget.book = draft.storedBook
         nugget.category = NuggetDraft.clean(draft.category)
@@ -130,20 +132,27 @@ final class SwiftDataNuggetStore: NuggetStore {
     }
 
     @discardableResult
-    func setActive(_ nugget: Nugget, _ active: Bool) throws -> ActivationOutcome {
-        guard nugget.isActive != active else { return active ? .active : .inactive }
-        if active {
-            guard try activeCount() < NuggetRules.activeLimit else {
-                return .keptInactiveLimitReached
-            }
-            nugget.sortOrder = try nextSortOrder()
+    func place(_ nugget: Nugget, in state: NuggetState, at index: Int? = nil) throws -> PlacementOutcome {
+        let from = nugget.nuggetState
+        if state == .active, from != .active, try activeCount() >= NuggetRules.activeLimit {
+            return .activeFull
         }
-        let timestamp = now()
-        nugget.isActive = active
-        nugget.deactivatedAt = active ? nil : timestamp
-        nugget.updatedAt = timestamp
+        let current = try nuggets(in: state)
+        let oldIndex = current.firstIndex { $0.id == nugget.id }
+        var target = current.filter { $0.id != nugget.id }
+        let newIndex = min(max(index ?? target.count, 0), target.count)
+        if from == state, oldIndex == newIndex { return .unchanged }
+
+        if from != state {
+            // Close the gap it leaves. Nothing moves up into Active.
+            Self.renumber(try nuggets(in: from).filter { $0.id != nugget.id })
+            nugget.nuggetState = state
+            nugget.updatedAt = now()
+        }
+        target.insert(nugget, at: newIndex)
+        Self.renumber(target)
         try context.save()
-        return active ? .active : .inactive
+        return from == state ? .reordered : .moved
     }
 
     func delete(_ nugget: Nugget) throws {
@@ -151,76 +160,122 @@ final class SwiftDataNuggetStore: NuggetStore {
         try context.save()
     }
 
-    func moveActive(fromOffsets source: IndexSet, toOffset destination: Int) throws {
-        var ordered = try activeNuggets()
-        ordered.move(fromOffsets: source, toOffset: destination)
-        for (index, nugget) in ordered.enumerated() where nugget.sortOrder != index {
-            nugget.sortOrder = index
+    // MARK: Migrations
+
+    /// Gives every nugget saved before states existed its section: active stays
+    /// active in rotation order; inactive and never moved out on purpose
+    /// becomes queued, oldest first; moved out on purpose becomes paused, in
+    /// the order it was moved out. Each group goes below anything already
+    /// migrated. Doesn't touch `updatedAt`, so backups still merge as before.
+    @discardableResult
+    func migrateLegacyStates() throws -> Int {
+        let all = try allNuggets()
+        let legacy = all.filter { NuggetState(rawValue: $0.state) == nil }
+        guard !legacy.isEmpty else { return 0 }
+        for state in NuggetState.allCases {
+            let migrated = all.filter { $0.state == state.rawValue }.sorted(by: Self.sectionOrder)
+            let group = legacy.filter { $0.legacyState == state }.sorted { lhs, rhs in
+                switch state {
+                case .active:
+                    return Self.sectionOrder(lhs, rhs)
+                case .queued:
+                    if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+                case .paused:
+                    let left = lhs.legacyDeactivatedAt ?? .distantPast
+                    let right = rhs.legacyDeactivatedAt ?? .distantPast
+                    if left != right { return left < right }
+                    if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            for nugget in group { nugget.state = state.rawValue }
+            Self.renumber(migrated + group)
         }
         try context.save()
+        return legacy.count
+    }
+
+    @discardableResult
+    func stripStoredQuotes() throws -> Int {
+        var changed = 0
+        for nugget in try allNuggets() {
+            let stripped = NuggetText.stored(nugget.text)
+            guard stripped != nugget.text, !stripped.isEmpty else { continue }
+            nugget.text = stripped
+            changed += 1
+        }
+        if changed > 0 { try context.save() }
+        return changed
     }
 
     // MARK: Backup
 
     func exportBackup() throws -> NuggetBackup {
-        let all = try activeNuggets() + inactiveNuggets()
+        let all = try NuggetState.allCases.flatMap { try nuggets(in: $0) }
         return NuggetBackup(exportedAt: now(), nuggets: all.map(NuggetBackup.Item.init))
     }
 
+    /// Merges by id: new nuggets go to the bottom of their section, and existing
+    /// ones are replaced only when the backup copy is newer. Active past the
+    /// limit goes to the bottom of Queued. A nugget whose content matches a
+    /// different nugget already here is skipped.
     func importBackup(_ backup: NuggetBackup) throws -> ImportSummary {
         var summary = ImportSummary()
-        var activeTotal = try activeCount()
-        var nextOrder = try nextSortOrder()
-
-        // Bring active items in by their backup order so the rotation keeps its shape.
-        let items = backup.nuggets.sorted { lhs, rhs in
-            if lhs.isActive != rhs.isActive { return lhs.isActive }
-            return lhs.sortOrder < rhs.sortOrder
+        var sections: [NuggetState: [Nugget]] = [:]
+        for state in NuggetState.allCases {
+            sections[state] = try nuggets(in: state)
+        }
+        var owners: [String: UUID] = [:]
+        for nugget in sections.values.joined() {
+            owners[NuggetText.matchKey(nugget.text)] = owners[NuggetText.matchKey(nugget.text)] ?? nugget.id
         }
 
-        for item in items {
-            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        /// Where it should go, falling back to Queued when Active is full.
+        func admit(_ wanted: NuggetState, alreadyActive: Bool) -> NuggetState {
+            guard wanted == .active, !alreadyActive,
+                  (sections[.active]?.count ?? 0) >= NuggetRules.activeLimit else { return wanted }
+            summary.queuedBecauseActiveFull += 1
+            return .queued
+        }
+
+        func move(_ nugget: Nugget, from: NuggetState, to: NuggetState) {
+            guard from != to else { return }
+            sections[from]?.removeAll { $0.id == nugget.id }
+            sections[to, default: []].append(nugget)
+            nugget.nuggetState = to
+        }
+
+        for item in backup.nuggets.sorted(by: NuggetBackup.Item.importOrder) {
+            let text = NuggetText.stored(item.text)
             guard !text.isEmpty else { continue }
+            let key = NuggetText.matchKey(text)
+            if let owner = owners[key], owner != item.id {
+                summary.duplicatesSkipped += 1
+                continue
+            }
 
             if let existing = try nugget(id: item.id) {
                 guard item.updatedAt > existing.updatedAt else {
                     summary.unchanged += 1
                     continue
                 }
+                let oldKey = NuggetText.matchKey(existing.text)
+                if owners[oldKey] == existing.id { owners[oldKey] = nil }
+                owners[key] = existing.id
                 existing.text = text
                 existing.author = NuggetDraft.clean(item.author ?? "")
                 existing.book = NuggetDraft.clean(item.book ?? "")
                 existing.category = NuggetDraft.clean(item.category ?? "")
                 existing.nuggetKind = item.resolvedKind
                 existing.updatedAt = item.updatedAt
-                if item.isActive && !existing.isActive {
-                    if activeTotal < NuggetRules.activeLimit {
-                        existing.isActive = true
-                        existing.deactivatedAt = nil
-                        existing.sortOrder = nextOrder
-                        nextOrder += 1
-                        activeTotal += 1
-                    } else {
-                        // Active in the backup, so it waits for a spot rather than counting as moved out.
-                        existing.deactivatedAt = nil
-                        summary.keptInactive += 1
-                    }
-                } else if !item.isActive && existing.isActive {
-                    existing.isActive = false
-                    existing.deactivatedAt = item.deactivatedAt
-                    activeTotal -= 1
-                } else if !item.isActive {
-                    // Inactive on both sides. Backups made before the field existed don't
-                    // know when it moved out, so keep what this device knows.
-                    existing.deactivatedAt = item.deactivatedAt ?? existing.deactivatedAt
-                }
+                let from = existing.nuggetState
+                // An older backup can't tell a waiting nugget from a paused one,
+                // so out of the rotation on both sides keeps what this device knows.
+                let wanted = !item.isStateKnown && from != .active ? from : item.resolvedState
+                move(existing, from: from, to: admit(wanted, alreadyActive: from == .active))
                 summary.updated += 1
             } else {
-                var makeActive = item.isActive
-                if makeActive && activeTotal >= NuggetRules.activeLimit {
-                    makeActive = false
-                    summary.keptInactive += 1
-                }
+                let state = admit(item.resolvedState, alreadyActive: false)
                 let nugget = Nugget(
                     id: item.id,
                     text: text,
@@ -228,21 +283,17 @@ final class SwiftDataNuggetStore: NuggetStore {
                     book: NuggetDraft.clean(item.book ?? ""),
                     category: NuggetDraft.clean(item.category ?? ""),
                     kind: item.resolvedKind,
-                    isActive: makeActive,
-                    sortOrder: makeActive ? nextOrder : 0,
+                    state: state,
                     createdAt: item.createdAt,
-                    updatedAt: item.updatedAt,
-                    // Nil when it's waiting for a spot: kept out by the limit, or from an older backup.
-                    deactivatedAt: item.isActive ? nil : item.deactivatedAt
+                    updatedAt: item.updatedAt
                 )
-                if makeActive {
-                    nextOrder += 1
-                    activeTotal += 1
-                }
                 context.insert(nugget)
+                sections[state, default: []].append(nugget)
+                owners[key] = nugget.id
                 summary.added += 1
             }
         }
+        for ordered in sections.values { Self.renumber(ordered) }
         try context.save()
         return summary
     }

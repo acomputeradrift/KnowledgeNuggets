@@ -3,15 +3,15 @@ import XCTest
 
 final class SaveCelebrationTests: XCTestCase {
     private func added(_ count: Int) -> SaveCelebration {
-        SaveCelebration(activeCount: count, limit: 21, keptInactive: false)
+        SaveCelebration(activeCount: count, limit: 21, activeFull: false)
     }
 
     private var keptFull: SaveCelebration {
-        SaveCelebration(activeCount: 21, limit: 21, outcome: .keptInactiveLimitReached)
+        SaveCelebration(activeCount: 21, limit: 21, outcome: .queuedBecauseActiveFull)
     }
 
-    private func switchedOff(_ count: Int = 8) -> SaveCelebration {
-        SaveCelebration(activeCount: count, limit: 21, outcome: .inactive)
+    private func choseQueued(_ count: Int = 8) -> SaveCelebration {
+        SaveCelebration(activeCount: count, limit: 21, outcome: .chose(.queued))
     }
 
     // MARK: Layout
@@ -26,7 +26,7 @@ final class SaveCelebrationTests: XCTestCase {
         }
     }
 
-    func testKeptInactiveBecauseFullShowsTheTwoStepBoxWithGoToNuggets() {
+    func testQueuedBecauseActiveFullShowsTheTwoStepBoxWithGoToNuggets() {
         let kept = keptFull
         XCTAssertEqual(kept.layout, .rotationFull)
         XCTAssertFalse(kept.showsProgress)
@@ -34,34 +34,53 @@ final class SaveCelebrationTests: XCTestCase {
         XCTAssertEqual(kept.primaryAction.title, "Go to Nuggets")
         XCTAssertEqual(kept.infoBox, SaveCelebration.InfoBox(
             title: "Your 21 active spots are full",
-            message: "It won't come up in your daily rotation until you move it to Active.",
-            steps: ["Swipe an active nugget to Inactive", "Swipe this one to Active"]
+            message: "It's at the bottom of your queue. It won't come up in your daily rotation until you activate it.",
+            steps: ["Pause an active nugget", "Swipe this one to Activate"]
         ))
     }
 
-    func testSwitchedOffShowsTheOneStepBoxWithAddAnother() {
-        let off = switchedOff()
-        XCTAssertEqual(off.layout, .switchedOff)
+    func testChoosingQueuedShowsTheOneStepBoxWithAddAnother() {
+        let off = choseQueued()
+        XCTAssertEqual(off.layout, .setAside)
         XCTAssertFalse(off.showsProgress)
         XCTAssertEqual(off.primaryAction, .addAnother)
         XCTAssertEqual(off.primaryAction.title, "Add Another")
         XCTAssertEqual(off.infoBox, SaveCelebration.InfoBox(
-            title: "Added to Inactive",
-            message: "It won't come up in your daily rotation until you move it to Active.",
-            steps: ["Swipe it to Active when you're ready"]
+            title: "Added to Queued",
+            message: "It won't come up in your daily rotation until you activate it.",
+            steps: ["Swipe it to Activate when you're ready"]
         ))
-        XCTAssertNotEqual(off, SaveCelebration(activeCount: 8, limit: 21, outcome: .keptInactiveLimitReached))
+        XCTAssertNotEqual(off, SaveCelebration(activeCount: 8, limit: 21, outcome: .queuedBecauseActiveFull))
     }
 
-    func testSwitchedOffWhileFullStillReadsAsSwitchedOff() {
-        let off = switchedOff(21)
-        XCTAssertEqual(off.layout, .switchedOff)
-        XCTAssertEqual(off.infoBox?.title, "Added to Inactive")
+    func testChoosingQueuedWhileFullStillReadsAsChosen() {
+        let off = choseQueued(21)
+        XCTAssertEqual(off.layout, .setAside)
+        XCTAssertEqual(off.infoBox?.title, "Added to Queued")
         XCTAssertEqual(off.primaryAction, .addAnother)
     }
 
+    func testChoosingPausedShowsTheOneStepBoxTitledPaused() {
+        let paused = SaveCelebration(activeCount: 8, limit: 21, outcome: .chose(.paused))
+        XCTAssertEqual(paused.layout, .setAside)
+        XCTAssertEqual(paused.primaryAction, .addAnother)
+        XCTAssertEqual(paused.infoBox, SaveCelebration.InfoBox(
+            title: "Added to Paused",
+            message: "It won't come up in your daily rotation until you activate it.",
+            steps: ["Swipe it to Activate when you're ready"]
+        ))
+        XCTAssertEqual(paused.announcement, "Nugget saved. Added to Paused.")
+        XCTAssertNil(paused.milestone)
+    }
+
+    func testOutcomesNameTheSectionTheNuggetEndsUpIn() {
+        XCTAssertEqual(ActivationOutcome.active.state, .active)
+        XCTAssertEqual(ActivationOutcome.queuedBecauseActiveFull.state, .queued)
+        XCTAssertEqual(ActivationOutcome.chose(.paused).state, .paused)
+    }
+
     func testFullBoxUsesTheLimitItIsGiven() {
-        let small = SaveCelebration(activeCount: 5, limit: 5, keptInactive: true)
+        let small = SaveCelebration(activeCount: 5, limit: 5, activeFull: true)
         XCTAssertEqual(small.infoBox?.title, "Your 5 active spots are full")
     }
 
@@ -86,13 +105,13 @@ final class SaveCelebrationTests: XCTestCase {
     }
 
     func testHeadlinesHaveNoExclamationMarks() {
-        for celebration in [added(1), added(7), added(8), added(14), added(21), keptFull, switchedOff()] {
+        for celebration in [added(1), added(7), added(8), added(14), added(21), keptFull, choseQueued()] {
             XCTAssertFalse(celebration.headline.contains("!"), celebration.headline)
         }
     }
 
-    func testInactiveSavesAreNeverAMilestone() {
-        for celebration in [keptFull, switchedOff(7), switchedOff(21)] {
+    func testSavesOutOfTheRotationAreNeverAMilestone() {
+        for celebration in [keptFull, choseQueued(7), choseQueued(21)] {
             XCTAssertNil(celebration.milestone)
             XCTAssertEqual(celebration.headline, "Nugget saved")
             XCTAssertFalse(celebration.isBigCelebration)
@@ -107,10 +126,10 @@ final class SaveCelebrationTests: XCTestCase {
     }
 
     func testOutcomeInitializer() {
-        XCTAssertFalse(SaveCelebration(activeCount: 3, limit: 21, outcome: .active).keptInactive)
-        XCTAssertTrue(keptFull.keptInactive)
-        XCTAssertTrue(switchedOff(3).keptInactive)
-        XCTAssertEqual(SaveCelebration(activeCount: 21, limit: 21, keptInactive: true), keptFull)
+        XCTAssertFalse(SaveCelebration(activeCount: 3, limit: 21, outcome: .active).isOutOfRotation)
+        XCTAssertTrue(keptFull.isOutOfRotation)
+        XCTAssertTrue(choseQueued(3).isOutOfRotation)
+        XCTAssertEqual(SaveCelebration(activeCount: 21, limit: 21, activeFull: true), keptFull)
     }
 
     // MARK: Sound
@@ -130,14 +149,14 @@ final class SaveCelebrationTests: XCTestCase {
         XCTAssertEqual(added(8).previousActiveCount, 7)
         XCTAssertEqual(added(21).progress, 1)
         XCTAssertEqual(keptFull.previousActiveCount, 21, "Nothing moved")
-        XCTAssertEqual(switchedOff(7).previousActiveCount, 7, "Nothing moved")
+        XCTAssertEqual(choseQueued(7).previousActiveCount, 7, "Nothing moved")
     }
 
     func testUsesTheLimitItIsGiven() {
-        let small = SaveCelebration(activeCount: 5, limit: 5, keptInactive: false)
+        let small = SaveCelebration(activeCount: 5, limit: 5, activeFull: false)
         XCTAssertEqual(small.milestone, .full)
         XCTAssertEqual(small.progressLabel, "5 of 5")
-        XCTAssertEqual(SaveCelebration(activeCount: 3, keptInactive: false).limit, NuggetRules.activeLimit)
+        XCTAssertEqual(SaveCelebration(activeCount: 3, activeFull: false).limit, NuggetRules.activeLimit)
     }
 
     // MARK: VoiceOver
@@ -147,6 +166,6 @@ final class SaveCelebrationTests: XCTestCase {
         XCTAssertEqual(added(7).announcement, "One week of nuggets. 7 of 21.")
         XCTAssertEqual(added(21).announcement, "Your rotation is full. 21 of 21.")
         XCTAssertEqual(keptFull.announcement, "Nugget saved. Your 21 active spots are full.")
-        XCTAssertEqual(switchedOff().announcement, "Nugget saved. Added to Inactive.")
+        XCTAssertEqual(choseQueued().announcement, "Nugget saved. Added to Queued.")
     }
 }

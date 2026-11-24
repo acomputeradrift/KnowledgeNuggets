@@ -14,6 +14,12 @@ struct NuggetEditorView: View {
     @State private var baseline: NuggetDraft
     /// Set after a new nugget is saved; shown in place of the form.
     @State private var celebration: SaveCelebration?
+    /// The existing nugget opened from the duplicate footer's Show It.
+    @State private var shownDuplicate: NuggetLink?
+    /// Whether the user tapped the state pill. A new nugget left on the Queued
+    /// default (Active was full) still counts as wanting Active, so the
+    /// celebration explains the full rotation (layout B) rather than a choice (C).
+    @State private var pickedState = false
     @FocusState private var focus: Field?
 
     private enum Field: Hashable {
@@ -62,18 +68,26 @@ struct NuggetEditorView: View {
                         .listRowBackground(Color.clear)
                 }
 
-                Section("Content") {
+                Section {
                     TextField("Type or paste…", text: $draft.text, axis: .vertical)
                         .lineLimit(4...14)
                         .focused($focus, equals: .content)
                         .accessibilityLabel("Content")
+                } header: {
+                    Text("Content")
+                } footer: {
+                    if let duplicate {
+                        DuplicateNote {
+                            shownDuplicate = NuggetLink(id: duplicate.id)
+                        }
+                    }
                 }
 
                 if draft.kind.hasSource {
                     sourceSection
                 }
 
-                activeSection
+                stateSection
                 categorySection
             }
             .listSectionSpacing(.compact)
@@ -86,18 +100,32 @@ struct NuggetEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: save)
-                        .disabled(!draft.canSave)
+                        .disabled(!canSave)
                 }
             }
             .interactiveDismissDisabled(draft != original)
             .onAppear {
                 if nugget == nil {
                     draft.kind = NuggetKind(rawValue: lastKind) ?? .default
+                    // Active when there's room, Queued when it's full.
+                    draft.state = model.defaultNewState
+                    baseline.state = draft.state
                     focus = .content
                 }
             }
+            .sheet(item: $shownDuplicate) { link in
+                NuggetDetailView(nuggetID: link.id)
+            }
         }
     }
+
+    /// The nugget that already has this content, other than the one being edited.
+    private var duplicate: Nugget? {
+        guard draft.isValid else { return nil }
+        return model.duplicate(of: draft.text, excluding: nugget)
+    }
+
+    private var canSave: Bool { draft.canSave && duplicate == nil }
 
     // MARK: Sections
 
@@ -139,28 +167,19 @@ struct NuggetEditorView: View {
         }
     }
 
-    /// Whether this nugget can be active: fewer than the limit are, or it already is.
-    private var canBeActive: Bool {
-        nugget?.isActive == true || model.active.count < NuggetRules.activeLimit
-    }
+    /// Whether this nugget can be active: there's a free spot, or it already is.
+    private var canBeActive: Bool { model.canBeActive(nugget) }
 
-    private var activeSection: some View {
+    private var stateSection: some View {
         Section {
-            // Shown off while the limit is reached, but the wish is kept: a new nugget
-            // saved then still counts as kept inactive because the limit was reached.
-            Toggle(isOn: Binding(
-                get: { draft.isActive && canBeActive },
-                set: { draft.isActive = $0 }
-            )) {
-                // A disabled Toggle in a Form keeps its label in the primary color.
-                Text("Active")
-                    .foregroundStyle(canBeActive ? .primary : .secondary)
-            }
-            .disabled(!canBeActive)
+            StatePicker(selection: Binding(
+                get: { draft.state },
+                set: { draft.state = $0; pickedState = true }
+            ), activeEnabled: canBeActive)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
         } footer: {
-            if !canBeActive {
-                Text(NuggetRules.activeLimitReachedNote)
-            }
+            Text(canBeActive ? NuggetRules.statePickerNote : NuggetRules.activeLimitReachedNote)
         }
     }
 
@@ -187,7 +206,7 @@ struct NuggetEditorView: View {
     }
 
     private func save() {
-        guard draft.canSave else { return }
+        guard canSave else { return }
         if let nugget {
             // Edits close, then confirm once the sheet is out of the way.
             let result = model.update(nugget, with: draft)
@@ -196,8 +215,10 @@ struct NuggetEditorView: View {
             return
         }
         lastKind = draft.kind.rawValue
+        var toSave = draft
+        if !pickedState, toSave.state == .queued, !canBeActive { toSave.state = .active }
         // Saves that fail close as before. New nuggets celebrate.
-        guard let result = model.save(draft) else {
+        guard let result = model.save(toSave) else {
             dismiss()
             return
         }
@@ -205,8 +226,8 @@ struct NuggetEditorView: View {
         celebration = result
     }
 
-    /// Shows the edit's confirmation after the sheet has slid away. A flipped
-    /// Active switch confirms the move, with Undo, like the list's swipe.
+    /// Shows the edit's confirmation after the sheet has slid away. A changed
+    /// section confirms the move, with Undo, like the list.
     private func confirmAfterDismissal(_ result: AppModel.EditResult) {
         guard let toasts else { return }
         let model = self.model
@@ -216,15 +237,15 @@ struct NuggetEditorView: View {
             case .updated:
                 toasts.show("Nugget updated")
             case .moved(let move):
-                toasts.show(move.message, successHaptic: move.isActive) {
+                toasts.show(move.message, successHaptic: move.entersActive) {
                     NuggetListView.undo(move, model: model, onRefused: { model.errorMessage = $0 })
                 }
             }
         }
     }
 
-    /// Closes the sheet and shows the Nuggets tab, where the new inactive
-    /// nugget can be swiped to Active once a spot is free.
+    /// Closes the sheet and shows the Nuggets tab, where the new queued
+    /// nugget can be swiped to Activate once a spot is free.
     private func goToNuggets() {
         dismiss()
         model.selectedTab = .nuggets
@@ -233,17 +254,89 @@ struct NuggetEditorView: View {
     /// Back to a fresh form that keeps the kind and source, so several nuggets
     /// from one book are quick to add.
     private func addAnother() {
-        // Keeps the Active switch too; it shows off by itself if the rotation filled up.
-        let next = NuggetDraft(author: draft.author, book: draft.book, kind: draft.kind, isActive: draft.isActive)
+        // Keeps the chosen section too, except Active once it has filled up.
+        let state = draft.state == .active ? model.defaultNewState : draft.state
+        let next = NuggetDraft(author: draft.author, book: draft.book, kind: draft.kind, state: state)
         draft = next
         baseline = next
         showsCategory = false
+        pickedState = false
         celebration = nil
         // Focus once the form has faded back in; focus set mid-transition is dropped.
         Task {
             try? await Task.sleep(for: .milliseconds(350))
             focus = .content
         }
+    }
+}
+
+/// "You already have this nugget." with a Show It button, under Content.
+struct DuplicateNote: View {
+    let onShow: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Label("You already have this nugget.", systemImage: "exclamationmark.circle.fill")
+                .foregroundStyle(.secondary)
+            Button("Show it", action: onShow)
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.borderless)
+                .accessibilityHint("Opens the nugget you already have.")
+        }
+        .padding(.top, 2)
+    }
+}
+
+/// Active | Queued | Paused as a pill: a capsule track with the chosen segment
+/// filled amber. Active can be greyed out when it's full.
+struct StatePicker: View {
+    @Binding var selection: NuggetState
+    var activeEnabled = true
+
+    @Namespace private var highlight
+    @ScaledMetric(relativeTo: .subheadline) private var inset: CGFloat = 4
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(NuggetState.allCases) { state in
+                segment(for: state)
+            }
+        }
+        .padding(inset)
+        .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+        .overlay(Capsule().strokeBorder(Color(.separator).opacity(0.6), lineWidth: 0.5))
+        .animation(.snappy(duration: 0.25), value: selection)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Section")
+    }
+
+    private func segment(for state: NuggetState) -> some View {
+        let isSelected = state == selection
+        let isEnabled = state != .active || activeEnabled
+        return Button {
+            selection = state
+        } label: {
+            Text(state.title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(isSelected ? Color.white : (isEnabled ? Color.primary : Color.secondary.opacity(0.6)))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(Color("AccentColor"))
+                            .matchedGeometryEffect(id: "selection", in: highlight)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint(isEnabled ? "" : NuggetRules.activeLimitReachedNote)
     }
 }
 

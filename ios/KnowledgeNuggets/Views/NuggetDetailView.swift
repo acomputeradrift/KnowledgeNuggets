@@ -14,7 +14,7 @@ struct NuggetDetailView: View {
                 if let nugget = model.nugget(id: nuggetID) {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
-                            Text(nugget.text)
+                            Text(nugget.quotedText)
                                 .font(.title2)
                                 .fontDesign(.serif)
                                 .textSelection(.enabled)
@@ -42,7 +42,7 @@ struct NuggetDetailView: View {
                                         .background(.tint.opacity(0.15), in: Capsule())
                                         .accessibilityLabel("Category: \(category)")
                                 }
-                                Text(nugget.isActive ? "· Active" : "· Inactive")
+                                Text("· \(nugget.nuggetState.title)")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }

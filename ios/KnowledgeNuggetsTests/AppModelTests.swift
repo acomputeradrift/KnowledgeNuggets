@@ -51,11 +51,11 @@ final class AppModelTests: XCTestCase {
         model.save(NuggetDraft(text: "One", kind: .affirmation))
         model.save(NuggetDraft(text: "Two", kind: .affirmation))
         await model.rescheduleNow()
-        XCTAssertEqual(Set(center.pending.map(\.content.body)), ["One", "Two"])
+        XCTAssertEqual(Set(center.pending.map(\.content.body)), ["“One”", "“Two”"])
 
-        model.setActive(model.active[0], false)
+        model.move(model.active[0], to: .paused)
         await model.rescheduleNow()
-        XCTAssertEqual(Set(center.pending.map(\.content.body)), ["Two"])
+        XCTAssertEqual(Set(center.pending.map(\.content.body)), ["“Two”"])
 
         model.setPaused(true)
         await model.rescheduleNow()
@@ -90,86 +90,89 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.upNextNugget?.text, "A")
     }
 
-    func testSavingPastTheLimitKeepsTheNuggetInactive() {
+    func testSavingPastTheLimitGoesToTheBottomOfQueued() {
         let model = makeModel()
+        model.save(NuggetDraft(text: "Already queued", kind: .affirmation, state: .queued))
         for index in 0..<21 {
             let result = model.save(NuggetDraft(text: "N\(index)", kind: .affirmation))
-            XCTAssertEqual(result, SaveCelebration(activeCount: index + 1, keptInactive: false))
+            XCTAssertEqual(result, SaveCelebration(activeCount: index + 1, activeFull: false))
         }
+        XCTAssertEqual(model.defaultNewState, .queued, "The editor starts on Queued once Active is full")
         let result = model.save(NuggetDraft(text: "Too many", kind: .affirmation))
-        XCTAssertEqual(result, SaveCelebration(activeCount: 21, keptInactive: true))
-        XCTAssertEqual(model.active.count, 21)
-        XCTAssertEqual(model.inactive.map(\.text), ["Too many"])
-    }
-
-    // MARK: Active switch
-
-    func testAddingWithTheSwitchOffSavesInactiveAtTheBottom() {
-        let model = makeModel()
-        model.save(NuggetDraft(text: "A", kind: .affirmation))
-        model.save(NuggetDraft(text: "B", kind: .affirmation))
-        model.setActive(model.active[0], false)
-
-        let result = model.save(NuggetDraft(text: "Off", kind: .affirmation, isActive: false))
-        XCTAssertEqual(result, SaveCelebration(activeCount: 1, outcome: .inactive))
-        XCTAssertEqual(result?.layout, .switchedOff)
-        XCTAssertNil(result?.milestone)
-        XCTAssertEqual(model.active.map(\.text), ["B"])
-        XCTAssertEqual(model.inactive.map(\.text), ["A", "Off"])
-        XCTAssertNotNil(model.inactive.last?.deactivatedAt)
-    }
-
-    func testSwitchOnWhenFullKeepsItWaitingAtTheTopOfInactive() {
-        let model = makeModel()
-        for index in 0..<21 { model.save(NuggetDraft(text: "N\(index)", kind: .affirmation)) }
-        model.save(NuggetDraft(text: "Off", kind: .affirmation, isActive: false))
-        let result = model.save(NuggetDraft(text: "Waiting", kind: .affirmation))
+        XCTAssertEqual(result, SaveCelebration(activeCount: 21, activeFull: true))
         XCTAssertEqual(result?.layout, .rotationFull)
         XCTAssertEqual(result?.primaryAction, .goToNuggets)
-        XCTAssertEqual(model.inactive.map(\.text), ["Waiting", "Off"])
-        XCTAssertNil(model.inactive[0].deactivatedAt)
+        XCTAssertEqual(model.active.count, 21)
+        XCTAssertEqual(model.queued.map(\.text), ["Already queued", "Too many"])
     }
 
-    func testEditingCanSwitchOutAndBackInButNeverMakeA22nd() throws {
+    // MARK: Choosing a section
+
+    func testNewNuggetsDefaultToActiveWhileThereIsRoom() {
+        let model = makeModel()
+        XCTAssertEqual(model.defaultNewState, .active)
+        XCTAssertEqual(NuggetDraft().state, .active)
+    }
+
+    func testAddingAsQueuedOrPausedGoesToTheBottomOfThatSection() {
+        let model = makeModel()
+        model.save(NuggetDraft(text: "A", kind: .affirmation))
+        model.save(NuggetDraft(text: "Q1", kind: .affirmation, state: .queued))
+        model.save(NuggetDraft(text: "P1", kind: .affirmation, state: .paused))
+
+        let queued = model.save(NuggetDraft(text: "Q2", kind: .affirmation, state: .queued))
+        XCTAssertEqual(queued, SaveCelebration(activeCount: 1, outcome: .chose(.queued)))
+        XCTAssertEqual(queued?.layout, .setAside)
+        XCTAssertNil(queued?.milestone)
+        let paused = model.save(NuggetDraft(text: "P2", kind: .affirmation, state: .paused))
+        XCTAssertEqual(paused?.infoBox?.title, "Added to Paused")
+
+        XCTAssertEqual(model.active.map(\.text), ["A"])
+        XCTAssertEqual(model.queued.map(\.text), ["Q1", "Q2"])
+        XCTAssertEqual(model.paused.map(\.text), ["P1", "P2"])
+    }
+
+    func testEditingCanMoveOutAndBackInButNeverMakeA22nd() throws {
         let model = makeModel()
         for index in 0..<21 { model.save(NuggetDraft(text: "N\(index)", kind: .affirmation)) }
         model.save(NuggetDraft(text: "Waiting", kind: .affirmation))
-        let waiting = try XCTUnwrap(model.inactive.first)
+        let waiting = try XCTUnwrap(model.queued.first)
+        XCTAssertFalse(model.canBeActive(waiting))
+        XCTAssertTrue(model.canBeActive(model.active[0]), "An active one always can")
 
-        // Switching on while full is refused, but the text edit still saves.
+        // Choosing Active while full is refused, but the text edit still saves.
         var draft = NuggetDraft(waiting)
         draft.text = "Waiting edited"
-        draft.isActive = true
-        XCTAssertNil(model.save(draft, editing: waiting))
+        draft.state = .active
+        XCTAssertEqual(model.update(waiting, with: draft), .updated)
         XCTAssertEqual(model.active.count, 21)
-        XCTAssertFalse(waiting.isActive)
+        XCTAssertEqual(waiting.nuggetState, .queued)
         XCTAssertEqual(waiting.text, "Waiting edited")
 
-        // An active nugget can always be switched off; that moves it out.
+        // An active nugget can always be paused; it goes to the bottom of Paused.
         let first = model.active[0]
         var off = NuggetDraft(first)
-        off.isActive = false
-        model.save(off, editing: first)
-        XCTAssertFalse(first.isActive)
-        XCTAssertNotNil(first.deactivatedAt)
+        off.state = .paused
+        guard case .moved(let move) = model.update(first, with: off) else { return XCTFail("Expected a move") }
+        XCTAssertEqual(move.message, "Moved to Paused")
+        XCTAssertFalse(move.entersActive)
         XCTAssertEqual(model.active.count, 20)
-        XCTAssertEqual(model.inactive.map(\.text), ["Waiting edited", "N0"], "Nothing is promoted")
+        XCTAssertEqual(model.queued.map(\.text), ["Waiting edited"], "Nothing is promoted")
 
-        // Now there's room, so switching it on appends it to the rotation.
+        // Now there's room, so choosing Active appends it to the rotation.
         draft = NuggetDraft(waiting)
-        draft.isActive = true
-        model.save(draft, editing: waiting)
-        XCTAssertTrue(waiting.isActive)
-        XCTAssertNil(waiting.deactivatedAt)
+        draft.state = .active
+        guard case .moved(let back) = model.update(waiting, with: draft) else { return XCTFail("Expected a move") }
+        XCTAssertTrue(back.entersActive)
         XCTAssertEqual(model.active.last?.text, "Waiting edited")
         XCTAssertEqual(model.active.count, 21)
     }
 
-    func testEditingTextKeepsTheInactiveOrder() {
+    func testEditingTextKeepsTheSectionOrder() {
         let model = makeModel()
-        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name, kind: .affirmation, isActive: false)) }
-        model.save(NuggetDraft(text: "B edited", kind: .affirmation, isActive: false), editing: model.inactive[1])
-        XCTAssertEqual(model.inactive.map(\.text), ["A", "B edited", "C"])
+        for name in ["A", "B", "C"] { model.save(NuggetDraft(text: name, kind: .affirmation, state: .paused)) }
+        model.save(NuggetDraft(text: "B edited", kind: .affirmation, state: .paused), editing: model.paused[1])
+        XCTAssertEqual(model.paused.map(\.text), ["A", "B edited", "C"])
     }
 
     func testEditingReturnsNoCelebration() {
@@ -305,7 +308,7 @@ final class AppModelTests: XCTestCase {
             let identifier = String(format: "nugget-2026-01-%02d", day)
             let request = center.pending.first { $0.identifier == identifier }
             XCTAssertNotNil(request, "Today's notification is queued on day \(day)")
-            XCTAssertEqual(request?.content.body, model.todayNugget?.text, "Day \(day)")
+            XCTAssertEqual(request?.content.body, model.todayNugget?.quotedText, "Day \(day)")
             XCTAssertEqual(
                 request.flatMap { NotificationScheduler.nuggetID(from: $0.content.userInfo) },
                 model.todayNugget?.id

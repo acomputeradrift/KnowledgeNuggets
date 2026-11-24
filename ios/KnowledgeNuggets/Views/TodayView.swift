@@ -46,7 +46,7 @@ struct TodayView: View {
             ContentUnavailableView {
                 Label("Nothing in Rotation", systemImage: "pause.circle")
             } description: {
-                Text("All your nuggets are inactive. Activate some in the Nuggets tab, or add a new one.")
+                Text("None of your nuggets are active. Activate some from Queued or Paused in the Nuggets tab, or add a new one.")
             } actions: {
                 Button("Add a Nugget") { isAdding = true }
                     .primaryActionStyle()
@@ -95,7 +95,7 @@ struct NuggetCard: View {
 
             Button(action: action) {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(nugget.text)
+                    Text(nugget.quotedText)
                         .font(prominent ? .title2 : .body)
                         .fontDesign(.serif)
                         .foregroundStyle(.primary)
@@ -117,7 +117,7 @@ struct NuggetCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(heading): \(nugget.text)")
+            .accessibilityLabel("\(heading): \(nugget.quotedText)")
             .accessibilityValue(nugget.attribution ?? "")
             .accessibilityHint("Opens the nugget.")
         }

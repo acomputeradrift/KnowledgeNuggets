@@ -57,7 +57,7 @@ final class NuggetKindTests: XCTestCase {
     // MARK: Storing kinds
 
     func testKindIsStoredAndAffirmationsDropTheSource() throws {
-        let (movie, _) = try store.add(NuggetDraft(text: "Try not.", author: "Yoda", book: "The Empire Strikes Back", kind: .movie), active: true)
+        let (movie, _) = try store.add(NuggetDraft(text: "Try not.", author: "Yoda", book: "The Empire Strikes Back", kind: .movie), state: .active)
         XCTAssertEqual(movie.nuggetKind, .movie)
         XCTAssertEqual(movie.author, "Yoda")
 
@@ -77,7 +77,7 @@ final class NuggetKindTests: XCTestCase {
     }
 
     func testBackupKeepsKindAndOldBackupsReadAsBooks() throws {
-        try store.add(NuggetDraft(text: "Listen.", author: "Host", kind: .podcast), active: true)
+        try store.add(NuggetDraft(text: "Listen.", author: "Host", kind: .podcast), state: .active)
         let decoded = try NuggetBackup.decode(try store.exportBackup().encoded())
         XCTAssertEqual(decoded.nuggets.first?.kind, "podcast")
 
@@ -112,7 +112,7 @@ final class NuggetKindTests: XCTestCase {
         XCTAssertNil(model.lookupTask)
         XCTAssertNil(model.active.first?.author)
 
-        let (nugget, _) = try store.add(NuggetDraft(text: "Placeholder verse line", author: "Made-up Artist", book: "Made-up Song", kind: .lyrics), active: true)
+        let (nugget, _) = try store.add(NuggetDraft(text: "Placeholder verse line", author: "Made-up Artist", book: "Made-up Song", kind: .lyrics), state: .active)
         let decoded = try NuggetBackup.decode(try store.exportBackup().encoded())
         XCTAssertEqual(decoded.nuggets.first { $0.id == nugget.id }?.kind, "lyrics")
         _ = try store.importBackup(decoded)

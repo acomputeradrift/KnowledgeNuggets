@@ -6,24 +6,57 @@ import SwiftData
 /// Every property is optional or has a default, and nothing is marked
 /// `@Attribute(.unique)`, so the model can be synced with CloudKit later
 /// without a migration.
+/// Where a nugget sits. Stored on `Nugget` as its raw value.
+enum NuggetState: String, CaseIterable, Codable, Identifiable, Sendable {
+    /// In the daily rotation, at most `NuggetRules.activeLimit`.
+    case active
+    /// Waiting for a spot. New nuggets go here when Active is full.
+    case queued
+    /// Set aside: not wanted any time soon, but not deleted.
+    case paused
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .active: return "Active"
+        case .queued: return "Queued"
+        case .paused: return "Paused"
+        }
+    }
+}
+
+/// A saved passage from the owner's reading.
+///
+/// Every property is optional or has a default, and nothing is marked
+/// `@Attribute(.unique)`, so the model can be synced with CloudKit later
+/// without a migration.
 @Model
 final class Nugget {
     var id: UUID = UUID()
+    /// Stored without wrapping quotation marks; shown with `NuggetText.quoted`.
     var text: String = ""
     var author: String?
     var book: String?
     var category: String?
     /// A `NuggetKind` raw value. Nuggets saved before kinds existed were books.
     var kind: String = NuggetKind.default.rawValue
-    var isActive: Bool = true
+    /// A `NuggetState` raw value. Empty for nuggets saved before states
+    /// existed, until `SwiftDataNuggetStore.migrateLegacyStates()` fills it in
+    /// from the legacy fields; `nuggetState` reads those meanwhile.
+    var state: String = ""
+    /// Position within its section (Active, Queued or Paused).
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
-    /// When the owner deliberately took this nugget out of the rotation. Nil
-    /// while active, and for nuggets left inactive only because the rotation
-    /// was full. Orders the Inactive list; optional so CloudKit and
-    /// lightweight migration accept it.
-    var deactivatedAt: Date?
+
+    /// Legacy, from before states: the old Active switch. Read only by the
+    /// state migration; renamed in Swift with `originalName` so existing
+    /// stores open with a lightweight migration and keep the value.
+    @Attribute(originalName: "isActive") var legacyIsActive: Bool = true
+    /// Legacy, from before states: when an inactive nugget was moved out on
+    /// purpose (nil while it waited for a spot). Read only by the migration.
+    @Attribute(originalName: "deactivatedAt") var legacyDeactivatedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -32,11 +65,10 @@ final class Nugget {
         book: String? = nil,
         category: String? = nil,
         kind: NuggetKind = .default,
-        isActive: Bool = true,
+        state: NuggetState = .active,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
-        updatedAt: Date = Date(),
-        deactivatedAt: Date? = nil
+        updatedAt: Date = Date()
     ) {
         self.id = id
         self.text = text
@@ -44,11 +76,12 @@ final class Nugget {
         self.book = book
         self.category = category
         self.kind = kind.rawValue
-        self.isActive = isActive
+        self.state = state.rawValue
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        self.deactivatedAt = deactivatedAt
+        self.legacyIsActive = state == .active
+        self.legacyDeactivatedAt = nil
     }
 
     /// A value copy that is safe to pass to the rotation and notification code.
@@ -91,6 +124,27 @@ extension Nugget {
         get { NuggetKind(storedValue: kind) }
         set { kind = newValue.rawValue }
     }
+
+    /// The nugget's section. Before the migration has run, it's worked out
+    /// from the legacy fields the same way the migration does.
+    var nuggetState: NuggetState {
+        get { NuggetState(rawValue: state) ?? legacyState }
+        set { state = newValue.rawValue }
+    }
+
+    /// In the daily rotation.
+    var isActive: Bool { nuggetState == .active }
+
+    /// The mapping from before states: active stays active; inactive and never
+    /// moved out on purpose (waiting for a spot) is queued; moved out on
+    /// purpose is paused.
+    var legacyState: NuggetState {
+        if legacyIsActive { return .active }
+        return legacyDeactivatedAt == nil ? .queued : .paused
+    }
+
+    /// The content as it's shown, in curly quotes.
+    var quotedText: String { NuggetText.quoted(text) }
 }
 
 /// Fields the editor produces.
@@ -100,9 +154,9 @@ struct NuggetDraft: Equatable, Sendable {
     var book: String = ""
     var category: String = ""
     var kind: NuggetKind = .default
-    /// The editor's Active switch. For a new nugget this is the wish; the store
-    /// still keeps it inactive when the rotation is full.
-    var isActive: Bool = true
+    /// The editor's Active | Queued | Paused choice. For a new nugget, Active
+    /// is the wish; the store still queues it when Active is full.
+    var state: NuggetState = .active
 
     init(
         text: String = "",
@@ -110,14 +164,14 @@ struct NuggetDraft: Equatable, Sendable {
         book: String = "",
         category: String = "",
         kind: NuggetKind = .default,
-        isActive: Bool = true
+        state: NuggetState = .active
     ) {
         self.text = text
         self.author = author
         self.book = book
         self.category = category
         self.kind = kind
-        self.isActive = isActive
+        self.state = state
     }
 
     init(_ nugget: Nugget) {
@@ -127,14 +181,17 @@ struct NuggetDraft: Equatable, Sendable {
             book: nugget.book ?? "",
             category: nugget.category ?? "",
             kind: nugget.nuggetKind,
-            isActive: nugget.isActive
+            state: nugget.nuggetState
         )
     }
 
     var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    /// The content as it's stored: trimmed, without wrapping quotation marks.
+    var storedText: String { NuggetText.stored(text) }
+
     /// The content is filled in.
-    var isValid: Bool { !trimmedText.isEmpty }
+    var isValid: Bool { !storedText.isEmpty }
 
     /// By or From is filled in, unless this kind has no source (affirmations).
     var hasRequiredSource: Bool {

@@ -31,26 +31,46 @@ enum SampleData {
         NuggetDraft(text: "Slow is smooth, and smooth is fast.", author: "U.S. Navy SEALs", kind: .quote),
     ]
 
+    /// Waiting for a spot, then set aside, so the Nuggets list shows all three sections.
+    static let queuedDrafts: [NuggetDraft] = [
+        NuggetDraft(
+            text: "The best time to plant a tree was twenty years ago. The second best time is now.",
+            author: "Chinese proverb",
+            kind: .quote
+        ),
+        NuggetDraft(text: "\u{201C}Simplicity is the ultimate sophistication.\u{201D}", author: "Leonardo da Vinci", kind: .quote),
+        NuggetDraft(text: "I finish what I start.", kind: .affirmation),
+    ]
+
+    static let pausedDrafts: [NuggetDraft] = [
+        NuggetDraft(
+            text: "It is not the critic who counts.",
+            author: "Theodore Roosevelt",
+            book: "Citizenship in a Republic",
+            kind: .quote
+        ),
+        NuggetDraft(text: "\"I'm gonna make him an offer he can't refuse.\"", author: "Vito Corleone", book: "The Godfather", kind: .movie),
+    ]
+
     /// Exactly `activeCount` active nuggets, reusing the samples with a number added.
     static func seed(into store: NuggetStore, activeCount: Int) {
         for index in 0..<max(0, activeCount) {
             var draft = drafts[index % drafts.count]
             if index >= drafts.count { draft.text += " (\(index + 1))" }
-            _ = try? store.add(draft, active: true)
+            _ = try? store.add(draft, state: .active)
         }
+    }
+
+    /// The queued and paused samples.
+    static func seedSetAside(into store: NuggetStore) {
+        for draft in queuedDrafts { _ = try? store.add(draft, state: .queued) }
+        for draft in pausedDrafts { _ = try? store.add(draft, state: .paused) }
     }
 
     static func seed(into store: NuggetStore) {
         for draft in drafts {
-            _ = try? store.add(draft, active: true)
+            _ = try? store.add(draft, state: .active)
         }
-        _ = try? store.add(
-            NuggetDraft(
-                text: "The best time to plant a tree was twenty years ago. The second best time is now.",
-                author: "Chinese proverb",
-                kind: .quote
-            ),
-            active: false
-        )
+        seedSetAside(into: store)
     }
 }
