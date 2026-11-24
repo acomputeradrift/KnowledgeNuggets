@@ -1,49 +1,55 @@
 # KnowledgeNuggets TODO
 
-## 2026-11-13
-
-### In progress
-- [x] **Today page didn't update to the new day.** The Today screen still showed yesterday's nugget the next morning. Fixed: it now refreshes at midnight, on clock or time zone changes, and when the app comes back to the front.
-- [x] **Add Lyrics as a kind of nugget.** It sits alongside Book, Movie, Show, Podcast, Quote, Affirmation and Other. Done: Artist and Song fields, no lookup.
-
-- [x] **The delete confirmation looked different from the app's other popups and pointed at the wrong nugget.** Fixed: it's now a centered alert showing a preview of the nugget's text.
-
-### To discuss first
-- [x] **Make adding a nugget exciting.**
-  - Haptics and a prominent green check.
-  - Encourage people to fill all 21 spots at the start.
-  - The same green check and text whichever list the new nugget joins.
-  - A small note at the bottom saying where the nugget went in line.
-  - Done: green check, haptics, progress ring, milestones at 1, 7, 14 and 21 with confetti at 21, Add Another, and the note ("Added to the end of your rotation." or "Added as Inactive. Your rotation is full."). Not yet felt on the phone: haptics, Reduce Motion and VoiceOver.
-- [x] ~~**Three states: Active, New and Inactive.**~~ Dropped: nothing is ever pulled into the rotation automatically.
-- [x] ~~**Let the user choose the rotation size.**~~ Decided: the maximum stays at 21. Users can have fewer by making nuggets inactive, and the app never fills the rotation automatically.
-- [x] **Order the Inactive list.** Nuggets added while the rotation was full go at the top, oldest first. Nuggets the user moved out on purpose go at the bottom. (Today the most recently changed nugget sits at the top, which is the wrong way round.)
-- [x] **"Active" switch on the add/edit form** (the app's terms are Active and Inactive). Done: the switch and its label grey out when 21 are active, with the note "21 nuggets are already active. Make one inactive first."
-
-### Feedback round (from testing on the phone)
-- [x] **The add-nugget celebration closes too fast to read.** Keep it up longer, and play a standard approval sound along with the haptic.
-- [x] **Haptic when moving a nugget from Inactive to Active.**
-- [x] **Moving between Active and Inactive should look the same both ways.** Fix the clunky animation and show a short confirmation instead of the row just disappearing. Only Inactive to Active gets the haptic.
-- [x] **Every action the user starts confirms that it worked (except reordering).** This covers editing, deleting, moving, the Settings changes and import. Adding has its own celebration.
-
-### Open
-- [x] **Choose the success sound.** Decided: keep the original two-note rising ding.
-
-## 2026-11-23
-- [x] **Check for duplicates automatically** when a nugget is saved.
-- [x] **Quotation marks, consistently.** If the content already has quotes, don't add them; if it doesn't, add them.
-- [x] **Three states: Active, Queued and Paused.** "Inactive" is renamed Paused.
-  - A new nugget goes to the bottom of Queued.
-  - Nuggets can be dragged and reordered freely between Queued and Paused.
-  - Dragging from either into a full Active list shows a message: pause at least one to make room.
-- Decided:
-  - Duplicates are blocked. The match ignores capital letters, spacing, quotation marks and end punctuation.
-  - Every nugget is shown in quotation marks, affirmations included.
-  - Nothing moves into Active automatically.
-  - The add and edit forms use a three-way Active | Queued | Paused pill. Active is greyed out when 21 are active. A new nugget defaults to Active, or to Queued when full.
-  - Swipes keep their current look, with new wording: Active nuggets get "Pause"; Queued and Paused nuggets get "Activate".
-  - Paused is for nuggets the user doesn't want to see any time soon but doesn't want to delete.
-- Done.
+## Check on the phone
+These are built and covered by tests, but nobody has tried them on the iPhone yet.
+- [ ] The haptic and the ding when you save a nugget.
+- [ ] The Active | Queued | Paused pill, including Active greyed out when all 21 spots are taken.
+- [ ] Layout C: the screen you see after saving a nugget as Queued or Paused yourself.
+- [ ] "You already have this nugget." when you type one you already have.
+- [ ] "Pause at least one to make room" when you drag into a full Active.
+- [ ] Dragging a nugget to the very top of Active.
 
 ## v2 ideas
 - [ ] **Search Nuggets:** browse and add nuggets shared by the community. This needs a backend, so it's out of scope for the local-only v1.
+
+## Done
+
+### 2026-11-23
+- [x] **Duplicates are blocked.** The match ignores capital letters, spacing, quotation marks and end punctuation. Import skips duplicates.
+- [x] **Every nugget is shown in curly quotes,** affirmations included. Quotes you type yourself aren't doubled up.
+- [x] **Three states: Active, Queued and Paused** ("Inactive" is now Paused).
+  - A new nugget goes to the bottom of Queued when Active is full.
+  - Paused is for nuggets you don't want to see any time soon but don't want to delete.
+  - Nuggets can be dragged between all three sections. Dragging into a full Active shows "Pause at least one to make room."
+  - Nothing moves into Active on its own.
+  - Swipes look the same as before: Active nuggets get "Pause"; Queued and Paused nuggets get "Activate".
+  - The add and edit forms use an Active | Queued | Paused pill.
+- [x] **The save screen has two layouts, and neither closes on its own.**
+  - A progress ring while you fill the 21 active spots.
+  - An info box when the nugget goes to Queued or Paused. "Go to Nuggets" appears when Active is full.
+- [x] **The Nuggets list has rounded corners at the top and the bottom.**
+- [x] **Fixed git:** your name, email and GitHub sign-in are set.
+
+### 2026-11-18 to 2026-11-19
+- [x] **Notifications:** the bold top line is who it's by and where it's from, and the full quote gets every line below it. The "Knowledge Nugget" title is gone.
+- [x] **Settings → About** shows the version and build code, so you can tell which build is on the phone.
+
+### 2026-11-13
+- [x] **The Today page moves on to the new day:** at midnight, on clock or time zone changes, and when the app comes back to the front.
+- [x] **Lyrics** is a kind of nugget, with Artist and Song.
+- [x] **Deleting** asks with a centered alert that previews the nugget.
+- [x] **Adding a nugget is a celebration:** a green check, haptic, the two-note rising ding, and confetti when the 21st spot fills.
+- [x] **The maximum stays at 21.** You can have fewer by pausing nuggets.
+- [x] **Every action you start confirms that it worked** (except reordering), with Undo for moves. Only moving into Active plays the haptic.
+- [x] **Moving between sections is one smooth animation.**
+
+### Decided not to do
+- Choosing your own rotation size (the maximum stays at 21).
+- Automatically moving nuggets into Active when a spot opens.
+- A reminder before the 60 days of queued notifications run out. Opening the app, or iOS's background refresh, keeps the queue topped up.
+- Starter nuggets for new users. Search Nuggets (v2) covers this instead.
+
+### Replaced by later decisions
+- The single Inactive list and its ordering became Queued and Paused.
+- The "Active" switch on the form became the Active | Queued | Paused pill.
+- The original celebration (milestone text, a note about where the nugget went, closing on its own) became the two save layouts.
